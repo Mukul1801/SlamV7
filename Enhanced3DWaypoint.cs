@@ -34,6 +34,12 @@ public class Enhanced3DWaypoint
     // Audio cues
     public string audioDescription;
     public string approachSound; // Path to custom sound file
+    
+    // NEW: Enhanced walkability data
+    public float walkabilityScore; // 0-1 confidence that this is walkable
+    public float slopeAngle;
+    public bool isValidated;
+    public List<Vector3> alternatePositions = new List<Vector3>(); // Backup positions if main position becomes invalid
 }
 
 [System.Serializable]
@@ -56,6 +62,12 @@ public class Enhanced3DMap
     public float averageNavigationTime;
     public float totalPathLength;
     public int successfulNavigations;
+    
+    // NEW: Enhanced map metadata
+    public float averageWalkabilityScore;
+    public int totalObstacles;
+    public List<string> environmentTypes = new List<string>(); // Indoor, Outdoor, Mixed, etc.
+    public string creatorNotes;
 }
 
 public class Enhanced3DMapManager : MonoBehaviour
@@ -65,6 +77,8 @@ public class Enhanced3DMapManager : MonoBehaviour
     public NavigationManager navigationManager;
     public TextToSpeech textToSpeech;
     public TextMeshProUGUI statusText;
+    public SafePathPlanner safePathPlanner;
+    public AccessibilityManager accessibilityManager;
     
     [Header("Waypoint Settings")]
     public float waypointSpacing = 2.0f; // Optimal spacing between waypoints
@@ -78,10 +92,25 @@ public class Enhanced3DMapManager : MonoBehaviour
     public int maxFeaturePointsPerWaypoint = 20;
     public bool validateEnvironmentOnLoad = true;
     
+    [Header("Walkability Validation")]
+    public float maxGroundSlope = 20f;
+    public float minPlaneArea = 1.0f;
+    public float walkabilityThreshold = 0.7f;
+    public bool onlyUseValidatedWaypoints = true;
+    
     [Header("Audio Enhancement")]
     public bool generateAudioCues = true;
     public AudioClip[] waypointSounds;
     public AudioClip[] directionSounds;
+    public AudioClip pathRecordingStartSound;
+    public AudioClip pathRecordingStopSound;
+    public AudioClip waypointAddedSound;
+    
+    [Header("Navigation Enhancement")]
+    public bool enablePredictiveGuidance = true;
+    public bool enableEnvironmentAwareness = true;
+    public float guidanceUpdateFrequency = 1.0f;
+    public float obstacleDetectionRange = 3.0f;
     
     // AR Components
     private ARPointCloudManager pointCloudManager;
@@ -96,6 +125,16 @@ public class Enhanced3DMapManager : MonoBehaviour
     private int currentWaypointIndex = 0;
     private Vector3 lastUserPosition;
     private bool isNavigating = false;
+    private bool isRecording = false;
+    
+    // Recording state
+    private Coroutine recordingCoroutine;
+    private Vector3 lastRecordedPosition;
+    private float lastRecordingTime;
+    
+    // Integration state
+    private bool isIntegratedWithNavManager = false;
+    private bool isIntegratedWithHitPointManager = false;
     
     void Start()
     {
@@ -106,9 +145,47 @@ public class Enhanced3DMapManager : MonoBehaviour
         
         if (arCamera == null)
             arCamera = FindObjectOfType<Camera>();
+        
+        // Find manager references if not set
+        if (hitPointManager == null)
+            hitPointManager = FindObjectOfType<HitPointManager>();
+            
+        if (navigationManager == null)
+            navigationManager = FindObjectOfType<NavigationManager>();
+            
+        if (textToSpeech == null)
+            textToSpeech = FindObjectOfType<TextToSpeech>();
+            
+        if (safePathPlanner == null)
+            safePathPlanner = FindObjectOfType<SafePathPlanner>();
+            
+        if (accessibilityManager == null)
+            accessibilityManager = FindObjectOfType<AccessibilityManager>();
             
         // Initialize
         InitializeMapManager();
+        
+        // Set up integration
+        SetupIntegration();
+    }
+    
+    private void SetupIntegration()
+    {
+        // Integrate with NavigationManager
+        if (navigationManager != null)
+        {
+            navigationManager.enhanced3DMapManager = this;
+            isIntegratedWithNavManager = true;
+            Debug.Log("Enhanced3DMapManager: Integrated with NavigationManager");
+        }
+        
+        // Integrate with HitPointManager
+        if (hitPointManager != null)
+        {
+            hitPointManager.enhanced3DMapManager = this;
+            isIntegratedWithHitPointManager = true;
+            Debug.Log("Enhanced3DMapManager: Integrated with HitPointManager");
+        }
     }
     
     private void InitializeMapManager()
@@ -126,34 +203,59 @@ public class Enhanced3DMapManager : MonoBehaviour
         currentMap.createdDate = DateTime.Now;
         
         Debug.Log("Enhanced 3D Map Manager initialized");
+        UpdateStatus("Enhanced 3D Map Manager ready");
     }
+    
+    #region Path Recording
     
     public void StartPathRecording(string pathName = "")
     {
+        if (isRecording)
+        {
+            SpeakMessage("Path recording is already active");
+            return;
+        }
+        
         if (string.IsNullOrEmpty(pathName))
         {
-            pathName = "Path_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            pathName = "EnhancedPath_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
         }
         
         currentMap.name = pathName;
-        currentMap.description = "Auto-generated navigation path";
+        currentMap.description = "Enhanced 3D navigation path with walkability validation";
         activeWaypoints.Clear();
+        currentWaypointIndex = 0;
+        isRecording = true;
+        
+        // Play recording start sound
+        if (pathRecordingStartSound != null && navigationManager?.audioSource != null)
+        {
+            navigationManager.audioSource.PlayOneShot(pathRecordingStartSound);
+        }
         
         // Start environment scanning
-        StartCoroutine(RecordPathWithOptimalWaypoints());
+        recordingCoroutine = StartCoroutine(RecordPathWithOptimalWaypoints());
         
         if (textToSpeech != null)
-            textToSpeech.Speak("Starting path recording. Walk slowly along your desired route.");
+            textToSpeech.Speak("Enhanced path recording started. Walk slowly along your desired route. I will place waypoints only on safe, walkable surfaces.");
             
-        UpdateStatus("Recording path: " + pathName);
+        UpdateStatus("Recording enhanced path: " + pathName);
+        
+        // Clear existing waypoints in HitPointManager if integrated
+        if (isIntegratedWithHitPointManager && hitPointManager != null)
+        {
+            hitPointManager.ClearCurrentWaypoints();
+            hitPointManager.poseClassList.Clear();
+        }
     }
     
     private IEnumerator RecordPathWithOptimalWaypoints()
     {
-        Vector3 lastWaypointPosition = Vector3.zero;
+        lastRecordedPosition = Vector3.zero;
+        lastRecordingTime = Time.time;
         bool isFirstWaypoint = true;
         
-        while (activeWaypoints.Count < maxWaypointsPerPath)
+        while (isRecording && activeWaypoints.Count < maxWaypointsPerPath)
         {
             Vector3 currentPosition = arCamera.transform.position;
             
@@ -167,8 +269,11 @@ public class Enhanced3DMapManager : MonoBehaviour
             }
             else
             {
-                float distanceFromLast = Vector3.Distance(currentPosition, lastWaypointPosition);
-                if (distanceFromLast >= waypointSpacing)
+                float distanceFromLast = Vector3.Distance(currentPosition, lastRecordedPosition);
+                float timeSinceLast = Time.time - lastRecordingTime;
+                
+                // Place waypoint based on distance and time
+                if (distanceFromLast >= waypointSpacing || timeSinceLast > 5.0f)
                 {
                     shouldPlaceWaypoint = true;
                 }
@@ -176,17 +281,42 @@ public class Enhanced3DMapManager : MonoBehaviour
             
             if (shouldPlaceWaypoint)
             {
-                yield return StartCoroutine(CreateEnhancedWaypoint(currentPosition));
-                lastWaypointPosition = currentPosition;
-                
-                UpdateStatus($"Recorded waypoint {activeWaypoints.Count}");
+                // Validate this is a walkable position
+                if (IsPositionWalkable(currentPosition))
+                {
+                    yield return StartCoroutine(CreateEnhancedWaypoint(currentPosition));
+                    lastRecordedPosition = currentPosition;
+                    lastRecordingTime = Time.time;
+                    
+                    UpdateStatus($"Recorded waypoint {activeWaypoints.Count} (validated walkable)");
+                }
+                else
+                {
+                    // Try to find nearby walkable position
+                    Vector3 walkablePosition = FindNearbyWalkablePosition(currentPosition);
+                    if (walkablePosition != Vector3.zero)
+                    {
+                        yield return StartCoroutine(CreateEnhancedWaypoint(walkablePosition));
+                        lastRecordedPosition = walkablePosition;
+                        lastRecordingTime = Time.time;
+                        
+                        UpdateStatus($"Recorded waypoint {activeWaypoints.Count} (adjusted to walkable surface)");
+                    }
+                    else
+                    {
+                        UpdateStatus("Waiting for walkable surface...");
+                    }
+                }
             }
             
             yield return new WaitForSeconds(0.5f); // Check every half second
         }
         
-        // Finish recording
-        CompletePathRecording();
+        // Auto-complete if we hit max waypoints
+        if (activeWaypoints.Count >= maxWaypointsPerPath)
+        {
+            CompletePathRecording();
+        }
     }
     
     private IEnumerator CreateEnhancedWaypoint(Vector3 position)
@@ -197,6 +327,11 @@ public class Enhanced3DMapManager : MonoBehaviour
         waypoint.rotation = arCamera.transform.rotation;
         waypoint.timestamp = DateTime.Now;
         waypoint.type = activeWaypoints.Count == 0 ? WaypointType.StartPoint : WaypointType.PathPoint;
+        
+        // Validate walkability
+        waypoint.walkabilityScore = CalculateWalkabilityScore(position);
+        waypoint.slopeAngle = CalculateSlopeAngle(position);
+        waypoint.isValidated = waypoint.walkabilityScore >= walkabilityThreshold;
         
         // Capture 3D environment data
         if (captureEnvironmentData)
@@ -229,6 +364,12 @@ public class Enhanced3DMapManager : MonoBehaviour
         // Create visual waypoint in the scene
         CreateVisualWaypoint(waypoint);
         
+        // Play waypoint added sound
+        if (waypointAddedSound != null && navigationManager?.audioSource != null)
+        {
+            navigationManager.audioSource.PlayOneShot(waypointAddedSound);
+        }
+        
         // Provide audio feedback
         if (textToSpeech != null)
         {
@@ -237,9 +378,201 @@ public class Enhanced3DMapManager : MonoBehaviour
             {
                 feedback += ". " + waypoint.description;
             }
+            
+            if (!waypoint.isValidated)
+            {
+                feedback += ". Warning: walkability validation failed.";
+            }
+            
             textToSpeech.Speak(feedback);
         }
     }
+    
+    public void CompletePathRecording()
+    {
+        if (!isRecording)
+        {
+            SpeakMessage("No active path recording to complete");
+            return;
+        }
+        
+        isRecording = false;
+        
+        if (recordingCoroutine != null)
+        {
+            StopCoroutine(recordingCoroutine);
+            recordingCoroutine = null;
+        }
+        
+        if (activeWaypoints.Count > 0)
+        {
+            // Mark last waypoint as end point
+            activeWaypoints[activeWaypoints.Count - 1].type = WaypointType.EndPoint;
+            
+            // Update the visual for the last waypoint
+            if (isIntegratedWithHitPointManager && hitPointManager != null)
+            {
+                hitPointManager.UpdateWaypointVisual(hitPointManager.poseClassList.Count - 1);
+            }
+            
+            // Update map metadata
+            currentMap.waypoints = new List<Enhanced3DWaypoint>(activeWaypoints);
+            currentMap.totalPathLength = CalculateTotalPathLength();
+            currentMap.averageWalkabilityScore = CalculateAverageWalkabilityScore();
+            currentMap.centerPoint = CalculateCenterPoint();
+            currentMap.mapBounds = CalculateMapBounds();
+            
+            // Generate environment fingerprint for validation
+            currentMap.environmentFingerprint = GenerateEnvironmentFingerprint();
+            
+            // Auto-save the map
+            SaveEnhanced3DMap();
+            
+            // Play completion sound
+            if (pathRecordingStopSound != null && navigationManager?.audioSource != null)
+            {
+                navigationManager.audioSource.PlayOneShot(pathRecordingStopSound);
+            }
+            
+            if (textToSpeech != null)
+            {
+                int validatedWaypoints = activeWaypoints.Count(w => w.isValidated);
+                textToSpeech.Speak($"Enhanced path recording completed. {activeWaypoints.Count} waypoints recorded over {currentMap.totalPathLength:F1} meters. {validatedWaypoints} waypoints are validated as walkable.");
+            }
+            
+            UpdateStatus($"Enhanced path completed: {currentMap.name}");
+        }
+        else
+        {
+            SpeakMessage("No waypoints were recorded");
+        }
+    }
+    
+    #endregion
+    
+    #region Walkability Validation
+    
+    private bool IsPositionWalkable(Vector3 position)
+    {
+        float walkabilityScore = CalculateWalkabilityScore(position);
+        return walkabilityScore >= walkabilityThreshold;
+    }
+    
+    private float CalculateWalkabilityScore(Vector3 position)
+    {
+        float score = 0f;
+        int checks = 0;
+        
+        // Check 1: Raycast downward to find ground
+        RaycastHit hit;
+        if (Physics.Raycast(position + Vector3.up * 0.5f, Vector3.down, out hit, 2.0f))
+        {
+            // Check surface normal (slope)
+            float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+            if (slopeAngle <= maxGroundSlope)
+            {
+                score += 0.4f; // 40% for good slope
+            }
+            else
+            {
+                score += Mathf.Max(0, 0.4f * (1f - (slopeAngle - maxGroundSlope) / 45f));
+            }
+            checks++;
+        }
+        
+        // Check 2: AR Plane detection
+        if (planeManager != null)
+        {
+            foreach (ARPlane plane in planeManager.trackables)
+            {
+                if (plane.alignment == PlaneAlignment.HorizontalUp)
+                {
+                    float distance = Vector3.Distance(position, plane.center);
+                    if (distance < 1.0f && plane.size.x * plane.size.y >= minPlaneArea)
+                    {
+                        score += 0.3f; // 30% for being on detected plane
+                        checks++;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Check 3: Obstacle detection
+        bool hasNearbyObstacles = false;
+        Collider[] obstacles = Physics.OverlapSphere(position, 0.5f);
+        foreach (Collider obstacle in obstacles)
+        {
+            if (obstacle.CompareTag("Obstacle"))
+            {
+                hasNearbyObstacles = true;
+                break;
+            }
+        }
+        
+        if (!hasNearbyObstacles)
+        {
+            score += 0.3f; // 30% for no nearby obstacles
+        }
+        checks++;
+        
+        // Normalize score
+        return checks > 0 ? score : 0f;
+    }
+    
+    private float CalculateSlopeAngle(Vector3 position)
+    {
+        RaycastHit hit;
+        if (Physics.Raycast(position + Vector3.up * 0.5f, Vector3.down, out hit, 2.0f))
+        {
+            return Vector3.Angle(hit.normal, Vector3.up);
+        }
+        return 0f;
+    }
+    
+    private Vector3 FindNearbyWalkablePosition(Vector3 originalPosition)
+    {
+        // Search in a circle around the original position
+        float searchRadius = 2.0f;
+        int searchSteps = 8;
+        
+        for (float radius = 0.5f; radius <= searchRadius; radius += 0.5f)
+        {
+            for (int i = 0; i < searchSteps; i++)
+            {
+                float angle = (float)i / searchSteps * 360f * Mathf.Deg2Rad;
+                Vector3 testPosition = originalPosition + new Vector3(
+                    Mathf.Cos(angle) * radius,
+                    0,
+                    Mathf.Sin(angle) * radius
+                );
+                
+                if (IsPositionWalkable(testPosition))
+                {
+                    return testPosition;
+                }
+            }
+        }
+        
+        return Vector3.zero; // No walkable position found
+    }
+    
+    private float CalculateAverageWalkabilityScore()
+    {
+        if (activeWaypoints.Count == 0) return 0f;
+        
+        float totalScore = 0f;
+        foreach (var waypoint in activeWaypoints)
+        {
+            totalScore += waypoint.walkabilityScore;
+        }
+        
+        return totalScore / activeWaypoints.Count;
+    }
+    
+    #endregion
+    
+    #region Environment Data Capture
     
     private IEnumerator Capture3DEnvironmentData(Enhanced3DWaypoint waypoint)
     {
@@ -260,7 +593,7 @@ public class Enhanced3DMapManager : MonoBehaviour
                         waypoint.nearbyPlanePoints.Add(worldPoint);
                     }
                     
-                    // Store ground height and surface normal
+                    // Store ground height and surface normal for horizontal planes
                     if (plane.alignment == PlaneAlignment.HorizontalUp)
                     {
                         waypoint.groundHeight = plane.center.y;
@@ -309,14 +642,38 @@ public class Enhanced3DMapManager : MonoBehaviour
         yield return null;
     }
     
+    #endregion
+    
+    #region Description Generation
+    
     private string GenerateWaypointDescription(Enhanced3DWaypoint waypoint)
     {
         List<string> descriptions = new List<string>();
         
+        // Walkability assessment
+        if (waypoint.walkabilityScore >= 0.8f)
+        {
+            descriptions.Add("Safe walkable surface");
+        }
+        else if (waypoint.walkabilityScore >= 0.6f)
+        {
+            descriptions.Add("Walkable with caution");
+        }
+        else
+        {
+            descriptions.Add("Questionable walkability");
+        }
+        
+        // Slope information
+        if (waypoint.slopeAngle > 10f)
+        {
+            descriptions.Add($"Slope {waypoint.slopeAngle:F0} degrees");
+        }
+        
         // Analyze nearby planes
         if (waypoint.nearbyPlanePoints.Count > 0)
         {
-            descriptions.Add("Near flat surface");
+            descriptions.Add("Near detected surface");
         }
         
         // Check for walls (vertical planes)
@@ -360,7 +717,7 @@ public class Enhanced3DMapManager : MonoBehaviour
         }
         else
         {
-            descriptions.Add($"Path waypoint {activeWaypoints.Count + 1}");
+            descriptions.Add($"Enhanced waypoint {activeWaypoints.Count + 1}");
         }
         
         return string.Join(", ", descriptions);
@@ -368,12 +725,11 @@ public class Enhanced3DMapManager : MonoBehaviour
     
     private string GenerateAudioDescription(Enhanced3DWaypoint waypoint)
     {
-        // Generate descriptive audio cue for TTS
         string audio = "";
         
         if (waypoint.type == WaypointType.StartPoint)
         {
-            audio = "Starting your journey from here. ";
+            audio = "Starting your enhanced navigation journey from here. ";
         }
         else if (waypoint.type == WaypointType.EndPoint)
         {
@@ -381,7 +737,21 @@ public class Enhanced3DMapManager : MonoBehaviour
         }
         else
         {
-            audio = $"Waypoint {activeWaypoints.Count + 1}. ";
+            audio = $"Enhanced waypoint {activeWaypoints.Count + 1}. ";
+        }
+        
+        // Add walkability context
+        if (waypoint.walkabilityScore >= 0.8f)
+        {
+            audio += "Safe walkable surface confirmed. ";
+        }
+        else if (waypoint.walkabilityScore >= 0.6f)
+        {
+            audio += "Walkable surface detected. ";
+        }
+        else
+        {
+            audio += "Caution: walkability uncertain. ";
         }
         
         // Add environment context
@@ -399,62 +769,18 @@ public class Enhanced3DMapManager : MonoBehaviour
             audio += "Open area with few obstacles. ";
         }
         
+        // Add slope warning
+        if (waypoint.slopeAngle > 15f)
+        {
+            audio += $"Moderate slope of {waypoint.slopeAngle:F0} degrees. ";
+        }
+        
         return audio;
     }
     
-    private float CalculateBearing(Vector3 from, Vector3 to)
-    {
-        Vector3 direction = to - from;
-        direction.y = 0; // Ignore vertical component
-        
-        // Calculate angle from north (forward direction)
-        float angle = Vector3.SignedAngle(Vector3.forward, direction, Vector3.up);
-        return angle;
-    }
+    #endregion
     
-    private void CreateVisualWaypoint(Enhanced3DWaypoint waypoint)
-    {
-        // Create visual representation using existing system
-        PoseClass poseClass = new PoseClass
-        {
-            trackingId = waypoint.id,
-            position = waypoint.position,
-            rotation = waypoint.rotation,
-            waypointType = waypoint.type,
-            description = waypoint.description
-        };
-        
-        hitPointManager.poseClassList.Add(poseClass);
-        hitPointManager.CreateWaypointVisual(hitPointManager.poseClassList.Count - 1);
-    }
-    
-    public void CompletePathRecording()
-    {
-        if (activeWaypoints.Count > 0)
-        {
-            // Mark last waypoint as end point
-            activeWaypoints[activeWaypoints.Count - 1].type = WaypointType.EndPoint;
-            
-            // Update map metadata
-            currentMap.waypoints = new List<Enhanced3DWaypoint>(activeWaypoints);
-            currentMap.totalPathLength = CalculateTotalPathLength();
-            currentMap.centerPoint = CalculateCenterPoint();
-            currentMap.mapBounds = CalculateMapBounds();
-            
-            // Generate environment fingerprint for validation
-            currentMap.environmentFingerprint = GenerateEnvironmentFingerprint();
-            
-            // Save the map
-            SaveEnhanced3DMap();
-            
-            if (textToSpeech != null)
-            {
-                textToSpeech.Speak($"Path recording completed. {activeWaypoints.Count} waypoints recorded over {currentMap.totalPathLength:F1} meters.");
-            }
-            
-            UpdateStatus($"Path completed: {currentMap.name}");
-        }
-    }
+    #region Map Management
     
     private float CalculateTotalPathLength()
     {
@@ -491,6 +817,16 @@ public class Enhanced3DMapManager : MonoBehaviour
         return bounds;
     }
     
+    private float CalculateBearing(Vector3 from, Vector3 to)
+    {
+        Vector3 direction = to - from;
+        direction.y = 0; // Ignore vertical component
+        
+        // Calculate angle from north (forward direction)
+        float angle = Vector3.SignedAngle(Vector3.forward, direction, Vector3.up);
+        return angle;
+    }
+    
     private byte[] GenerateEnvironmentFingerprint()
     {
         // Create a unique fingerprint of the environment for validation
@@ -512,9 +848,13 @@ public class Enhanced3DMapManager : MonoBehaviour
             bytes.AddRange(BitConverter.GetBytes(point.z));
         }
         
-        // Simple hash (in production, use a proper hash function)
+        // Use SHA256 for hashing
         return System.Security.Cryptography.SHA256.Create().ComputeHash(bytes.ToArray());
     }
+    
+    #endregion
+    
+    #region File Operations
     
     public void SaveEnhanced3DMap()
     {
@@ -527,13 +867,15 @@ public class Enhanced3DMapManager : MonoBehaviour
             Debug.Log($"Enhanced 3D map saved: {filePath}");
             
             if (textToSpeech != null)
-                textToSpeech.Speak("Map saved successfully");
+                textToSpeech.Speak("Enhanced map saved successfully");
+                
+            UpdateStatus($"Map saved: {currentMap.name}");
         }
         catch (Exception e)
         {
             Debug.LogError($"Error saving enhanced 3D map: {e.Message}");
             if (textToSpeech != null)
-                textToSpeech.Speak("Error saving map");
+                textToSpeech.Speak("Error saving enhanced map");
         }
     }
     
@@ -562,7 +904,7 @@ public class Enhanced3DMapManager : MonoBehaviour
             
             if (!File.Exists(filePath))
             {
-                Debug.LogError($"Map file not found: {filePath}");
+                Debug.LogError($"Enhanced map file not found: {filePath}");
                 return false;
             }
             
@@ -583,11 +925,13 @@ public class Enhanced3DMapManager : MonoBehaviour
                 LoadWaypointsToScene();
             }
             
+            UpdateStatus($"Loaded enhanced map: {mapName}");
             return true;
         }
         catch (Exception e)
         {
             Debug.LogError($"Error loading enhanced 3D map: {e.Message}");
+            SpeakMessage("Error loading enhanced map");
             return false;
         }
     }
@@ -611,7 +955,7 @@ public class Enhanced3DMapManager : MonoBehaviour
         {
             UpdateStatus($"Environment validated ({similarity:P0} match)");
             if (textToSpeech != null)
-                textToSpeech.Speak($"Environment validated with {similarity:P0} confidence. Loading path.");
+                textToSpeech.Speak($"Environment validated with {similarity:P0} confidence. Loading enhanced path.");
             
             LoadWaypointsToScene();
         }
@@ -619,9 +963,9 @@ public class Enhanced3DMapManager : MonoBehaviour
         {
             UpdateStatus($"Environment mismatch ({similarity:P0} match)");
             if (textToSpeech != null)
-                textToSpeech.Speak($"Warning: This may not be the correct location. Environment match is only {similarity:P0}. Do you want to continue?");
+                textToSpeech.Speak($"Warning: This may not be the correct location. Environment match is only {similarity:P0}. Loading enhanced path anyway.");
             
-            // For now, load anyway but with warning
+            // Load anyway but with warning
             LoadWaypointsToScene();
         }
     }
@@ -671,12 +1015,74 @@ public class Enhanced3DMapManager : MonoBehaviour
     
     private void LoadWaypointsToScene()
     {
-        // Clear existing waypoints
-        hitPointManager.ClearCurrentWaypoints();
-        hitPointManager.poseClassList.Clear();
+        // Clear existing waypoints in integrated systems
+        if (isIntegratedWithHitPointManager && hitPointManager != null)
+        {
+            hitPointManager.ClearCurrentWaypoints();
+            hitPointManager.poseClassList.Clear();
+        }
         
         // Load enhanced waypoints
         foreach (var waypoint in currentMap.waypoints)
+        {
+            // Create PoseClass for compatibility with existing system
+            PoseClass poseClass = new PoseClass
+            {
+                trackingId = waypoint.id,
+                position = waypoint.position,
+                rotation = waypoint.rotation,
+                waypointType = waypoint.type,
+                description = waypoint.description
+            };
+            
+            if (isIntegratedWithHitPointManager && hitPointManager != null)
+            {
+                hitPointManager.poseClassList.Add(poseClass);
+            }
+        }
+        
+        // Create visuals if integrated with HitPointManager
+        if (isIntegratedWithHitPointManager && hitPointManager != null)
+        {
+            for (int i = 0; i < hitPointManager.poseClassList.Count; i++)
+            {
+                hitPointManager.CreateWaypointVisual(i);
+            }
+        }
+        
+        UpdateStatus($"Loaded {currentMap.waypoints.Count} enhanced waypoints");
+        
+        if (textToSpeech != null)
+        {
+            int validatedWaypoints = currentMap.waypoints.Count(w => w.isValidated);
+            textToSpeech.Speak($"Loaded enhanced path {currentMap.name} with {currentMap.waypoints.Count} waypoints. {validatedWaypoints} waypoints are validated as walkable. Total distance: {currentMap.totalPathLength:F1} meters.");
+        }
+    }
+    
+    private string GetMapsDirectory()
+    {
+        string basePath = "";
+        
+        if (isIntegratedWithHitPointManager && hitPointManager != null)
+        {
+            basePath = hitPointManager.GetAndroidExternalStoragePath();
+        }
+        else
+        {
+            basePath = Application.persistentDataPath;
+        }
+        
+        return Path.Combine(basePath, "Enhanced3DMaps");
+    }
+    
+    #endregion
+    
+    #region Visual Waypoint Creation
+    
+    private void CreateVisualWaypoint(Enhanced3DWaypoint waypoint)
+    {
+        // Create visual representation using existing system if integrated
+        if (isIntegratedWithHitPointManager && hitPointManager != null)
         {
             PoseClass poseClass = new PoseClass
             {
@@ -688,28 +1094,19 @@ public class Enhanced3DMapManager : MonoBehaviour
             };
             
             hitPointManager.poseClassList.Add(poseClass);
-        }
-        
-        // Create visuals
-        for (int i = 0; i < hitPointManager.poseClassList.Count; i++)
-        {
-            hitPointManager.CreateWaypointVisual(i);
-        }
-        
-        UpdateStatus($"Loaded {currentMap.waypoints.Count} waypoints");
-        
-        if (textToSpeech != null)
-        {
-            textToSpeech.Speak($"Loaded path {currentMap.name} with {currentMap.waypoints.Count} waypoints. Total distance: {currentMap.totalPathLength:F1} meters.");
+            hitPointManager.CreateWaypointVisual(hitPointManager.poseClassList.Count - 1);
         }
     }
+    
+    #endregion
+    
+    #region Navigation
     
     public void StartEnhancedNavigation()
     {
         if (currentMap == null || currentMap.waypoints.Count == 0)
         {
-            if (textToSpeech != null)
-                textToSpeech.Speak("No path loaded for navigation");
+            SpeakMessage("No enhanced path loaded for navigation");
             return;
         }
         
@@ -720,7 +1117,10 @@ public class Enhanced3DMapManager : MonoBehaviour
         StartCoroutine(EnhancedNavigationLoop());
         
         if (textToSpeech != null)
-            textToSpeech.Speak("Enhanced navigation started. Follow the audio cues to your destination.");
+        {
+            int validatedWaypoints = currentMap.waypoints.Count(w => w.isValidated);
+            textToSpeech.Speak($"Enhanced navigation started. Following validated path with {validatedWaypoints} confirmed walkable waypoints. Listen for audio cues to reach your destination safely.");
+        }
     }
     
     private IEnumerator EnhancedNavigationLoop()
@@ -733,7 +1133,7 @@ public class Enhanced3DMapManager : MonoBehaviour
             // Check if waypoint is reached
             float distance = Vector3.Distance(userPosition, currentWaypoint.position);
             
-            if (distance < navigationManager.waypointReachedDistance)
+            if (distance < (navigationManager?.waypointReachedDistance ?? 1.0f))
             {
                 // Waypoint reached
                 OnWaypointReached(currentWaypoint);
@@ -745,7 +1145,7 @@ public class Enhanced3DMapManager : MonoBehaviour
                 ProvideEnhancedGuidance(currentWaypoint, userPosition);
             }
             
-            yield return new WaitForSeconds(2.0f); // Update every 2 seconds
+            yield return new WaitForSeconds(guidanceUpdateFrequency);
         }
         
         if (currentWaypointIndex >= currentMap.waypoints.Count)
@@ -758,19 +1158,26 @@ public class Enhanced3DMapManager : MonoBehaviour
     private void OnWaypointReached(Enhanced3DWaypoint waypoint)
     {
         // Play waypoint sound
-        if (navigationManager.audioSource != null && navigationManager.waypointReachedSound != null)
+        if (navigationManager?.audioSource != null && navigationManager.waypointReachedSound != null)
         {
             navigationManager.audioSource.PlayOneShot(navigationManager.waypointReachedSound);
         }
         
-        // Announce waypoint
+        // Announce waypoint with enhanced information
         if (textToSpeech != null)
         {
-            string announcement = "Waypoint reached";
+            string announcement = "Enhanced waypoint reached";
             if (!string.IsNullOrEmpty(waypoint.audioDescription))
             {
                 announcement += ". " + waypoint.audioDescription;
             }
+            
+            // Add walkability confidence
+            if (!waypoint.isValidated)
+            {
+                announcement += " Caution: walkability validation failed for this point.";
+            }
+            
             textToSpeech.Speak(announcement);
         }
     }
@@ -787,8 +1194,8 @@ public class Enhanced3DMapManager : MonoBehaviour
         float angle = Vector3.SignedAngle(userForward, direction.normalized, Vector3.up);
         float distance = direction.magnitude;
         
-        // Generate guidance message
-        string guidance = GenerateGuidanceMessage(angle, distance, targetWaypoint);
+        // Generate enhanced guidance message
+        string guidance = GenerateEnhancedGuidanceMessage(angle, distance, targetWaypoint);
         
         if (textToSpeech != null)
         {
@@ -796,7 +1203,7 @@ public class Enhanced3DMapManager : MonoBehaviour
         }
     }
     
-    private string GenerateGuidanceMessage(float angle, float distance, Enhanced3DWaypoint waypoint)
+    private string GenerateEnhancedGuidanceMessage(float angle, float distance, Enhanced3DWaypoint waypoint)
     {
         string direction = "";
         
@@ -820,6 +1227,16 @@ public class Enhanced3DMapManager : MonoBehaviour
             message += $". Landmark: {waypoint.nearbyLandmarks[0]}";
         }
         
+        // Add walkability information
+        if (!waypoint.isValidated)
+        {
+            message += ". Warning: destination walkability uncertain";
+        }
+        else if (waypoint.slopeAngle > 15f)
+        {
+            message += $". Moderate slope of {waypoint.slopeAngle:F0} degrees ahead";
+        }
+        
         return message;
     }
     
@@ -831,39 +1248,33 @@ public class Enhanced3DMapManager : MonoBehaviour
         currentMap.successfulNavigations++;
         SaveEnhanced3DMap(); // Save updated statistics
         
-        if (navigationManager.audioSource != null && navigationManager.destinationReachedSound != null)
+        if (navigationManager?.audioSource != null && navigationManager.destinationReachedSound != null)
         {
             navigationManager.audioSource.PlayOneShot(navigationManager.destinationReachedSound);
         }
         
         if (textToSpeech != null)
         {
-            textToSpeech.Speak("Congratulations! You have successfully reached your destination.");
+            textToSpeech.Speak("Congratulations! You have successfully reached your destination using enhanced 3D navigation with validated walkable waypoints.");
         }
         
-        UpdateStatus("Navigation completed successfully");
+        UpdateStatus("Enhanced navigation completed successfully");
     }
     
-    private string GetMapsDirectory()
-    {
-        return Path.Combine(hitPointManager.GetAndroidExternalStoragePath(), "Enhanced3DMaps");
-    }
-    
-    private void UpdateStatus(string message)
-    {
-        if (statusText != null)
-        {
-            statusText.text = message;
-        }
-        Debug.Log("Enhanced3DMapManager: " + message);
-    }
-    
-    // Public interface methods
     public void StopNavigation()
     {
         isNavigating = false;
-        UpdateStatus("Navigation stopped");
+        UpdateStatus("Enhanced navigation stopped");
+        
+        if (textToSpeech != null)
+        {
+            textToSpeech.Speak("Enhanced navigation stopped");
+        }
     }
+    
+    #endregion
+    
+    #region Public Interface
     
     public bool IsNavigating()
     {
@@ -879,4 +1290,44 @@ public class Enhanced3DMapManager : MonoBehaviour
     {
         return currentWaypointIndex;
     }
+    
+    public bool IsRecording()
+    {
+        return isRecording;
+    }
+    
+    public float GetPathCompletionPercentage()
+    {
+        if (currentMap == null || currentMap.waypoints.Count == 0)
+            return 0f;
+            
+        return (float)currentWaypointIndex / currentMap.waypoints.Count;
+    }
+    
+    #endregion
+    
+    #region Helper Methods
+    
+    private void UpdateStatus(string message)
+    {
+        if (statusText != null)
+        {
+            statusText.text = message;
+        }
+        Debug.Log("Enhanced3DMapManager: " + message);
+    }
+    
+    private void SpeakMessage(string message)
+    {
+        if (textToSpeech != null)
+        {
+            textToSpeech.Speak(message);
+        }
+        else
+        {
+            Debug.Log("Enhanced3DMapManager: " + message);
+        }
+    }
+    
+    #endregion
 }

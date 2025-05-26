@@ -4,7 +4,6 @@ using UnityEngine;
 using UnityEngine.Events;
 using System;
 
-// Define StringEvent class
 [System.Serializable]
 public class StringEvent : UnityEvent<string> { }
 
@@ -18,7 +17,6 @@ public class VoiceCommand
 
 public class VoiceRecognitionHelper : MonoBehaviour
 {
-    // Listeners
     public StringEvent OnCommandRecognized = new StringEvent();
     
     [Header("Voice Recognition Settings")]
@@ -44,6 +42,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
     private AndroidJavaObject speechRecognizerIntent;
     private bool isSupportedPlatform = false;
     private Coroutine autoListenCoroutine;
+    private bool permissionGranted = false;
     
     // Default commands
     private VoiceCommand[] defaultCommands = new VoiceCommand[]
@@ -80,15 +79,15 @@ public class VoiceRecognitionHelper : MonoBehaviour
         },
         new VoiceCommand 
         { 
-            command = "Open menu", 
-            alternateCommands = new string[] { "Accessibility menu", "Settings menu", "Options", "Menu" },
-            description = "Open the accessibility settings menu"
+            command = "Record path", 
+            alternateCommands = new string[] { "Start recording", "Create path", "Record route" },
+            description = "Start recording a new path"
         },
         new VoiceCommand 
         { 
-            command = "Close menu", 
-            alternateCommands = new string[] { "Exit menu", "Hide menu", "Back" },
-            description = "Close the currently open menu"
+            command = "Save path", 
+            alternateCommands = new string[] { "Stop recording", "Save route", "Finish path" },
+            description = "Save the current path"
         },
         new VoiceCommand 
         { 
@@ -98,36 +97,26 @@ public class VoiceRecognitionHelper : MonoBehaviour
         },
         new VoiceCommand 
         { 
-            command = "Save path", 
-            alternateCommands = new string[] { "Store path", "Save route", "Save current path", "Store route" },
-            description = "Save the current path to storage"
-        },
-        new VoiceCommand 
-        { 
-            command = "Emergency help", 
-            alternateCommands = new string[] { "Emergency", "Help me", "I'm lost", "SOS" },
-            description = "Get immediate assistance in case of emergency"
+            command = "Emergency", 
+            alternateCommands = new string[] { "Help me", "I'm lost", "SOS" },
+            description = "Get immediate assistance"
         },
         new VoiceCommand 
         { 
             command = "Repeat", 
             alternateCommands = new string[] { "Say again", "Repeat that", "Again" },
             description = "Repeat the last instruction"
-        },
-        new VoiceCommand 
-        { 
-            command = "Next direction", 
-            alternateCommands = new string[] { "Next instruction", "What's next", "Continue" },
-            description = "Get the next navigation instruction"
         }
     };
     
     void Start()
     {
-        // Check if we're on a supported platform
+        Debug.Log("VoiceRecognitionHelper: Starting initialization");
+        
+        // Check platform support
         isSupportedPlatform = Application.platform == RuntimePlatform.Android;
         
-        // Set up audio source if needed
+        // Set up audio source
         if (audioSource == null)
         {
             audioSource = GetComponent<AudioSource>();
@@ -137,77 +126,160 @@ public class VoiceRecognitionHelper : MonoBehaviour
             }
         }
         
-        // Set up default commands if none provided
+        // Set up default commands
         if (predefinedCommands == null || predefinedCommands.Length == 0)
         {
             predefinedCommands = defaultCommands;
         }
         
         // Initialize voice recognition
+        StartCoroutine(InitializeWithDelay());
+    }
+    
+    private IEnumerator InitializeWithDelay()
+    {
+        // Wait a bit for the app to fully initialize
+        yield return new WaitForSeconds(1.0f);
+        
         Initialize();
         
-        // Start auto-listening if enabled
+        // Start auto-listening if enabled and initialized
         if (autoStartListening && isInitialized)
         {
+            yield return new WaitForSeconds(2.0f);
             StartAutoListening();
         }
     }
     
     public void Initialize()
     {
-        Debug.Log("VoiceRecognitionHelper Initialize called");
+        Debug.Log("VoiceRecognitionHelper: Initialize called");
         
-        if (!isSupportedPlatform)
-        {
-            Debug.LogWarning("Voice recognition is only supported on Android platforms.");
-            // Still mark as initialized for editor testing
-            isInitialized = true;
-            return;
-        }
-
         if (isInitialized)
         {
+            Debug.Log("Already initialized");
             return;
         }
 
-        #if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (!isSupportedPlatform)
+        {
+            Debug.LogWarning("Voice recognition only supported on Android");
+            return;
+        }
+
+        try
+        {
+            // Check and request permissions first
+            if (!CheckPermissions())
+            {
+                RequestPermissions();
+                return;
+            }
+            
+            InitializeAndroidSpeechRecognizer();
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("Error initializing voice recognition: " + e.Message);
+            PlayErrorSound();
+        }
+#else
+        // Editor mode - simulate initialization
+        isInitialized = true;
+        Debug.Log("Voice recognition simulated in Unity Editor");
+#endif
+    }
+    
+#if UNITY_ANDROID && !UNITY_EDITOR
+    private bool CheckPermissions()
+    {
         try
         {
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
             {
                 using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
                 {
-                    // Check if we have the RECORD_AUDIO permission
                     int permissionResult = activity.Call<int>("checkSelfPermission", "android.permission.RECORD_AUDIO");
-                    if (permissionResult != 0) // PERMISSION_GRANTED = 0
-                    {
-                        Debug.LogWarning("RECORD_AUDIO permission not granted. Requesting permission...");
-                        string[] permissions = new string[] { "android.permission.RECORD_AUDIO" };
-                        activity.Call("requestPermissions", permissions, 1001);
-                        
-                        // Schedule re-initialization after a delay
-                        StartCoroutine(RetryInitializationAfterPermission());
-                        return;
-                    }
-
-                    // Create the speech recognizer
+                    permissionGranted = (permissionResult == 0); // PERMISSION_GRANTED = 0
+                    Debug.Log("Permission check result: " + (permissionGranted ? "GRANTED" : "DENIED"));
+                    return permissionGranted;
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("Error checking permissions: " + e.Message);
+            return false;
+        }
+    }
+    
+    private void RequestPermissions()
+    {
+        try
+        {
+            using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            {
+                using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
+                    string[] permissions = new string[] { "android.permission.RECORD_AUDIO" };
+                    activity.Call("requestPermissions", permissions, 1001);
+                    
+                    Debug.Log("Permission requested, will retry initialization");
+                    StartCoroutine(RetryInitializationAfterPermission());
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError("Error requesting permissions: " + e.Message);
+        }
+    }
+    
+    private IEnumerator RetryInitializationAfterPermission()
+    {
+        yield return new WaitForSeconds(3.0f);
+        
+        if (CheckPermissions())
+        {
+            InitializeAndroidSpeechRecognizer();
+        }
+        else
+        {
+            Debug.LogError("Permission still not granted after request");
+        }
+    }
+    
+    private void InitializeAndroidSpeechRecognizer()
+    {
+        try
+        {
+            using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+            {
+                using (AndroidJavaObject activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity"))
+                {
                     AndroidJavaClass speechRecognizerClass = new AndroidJavaClass("android.speech.SpeechRecognizer");
-
-                    // Check if speech recognition is available
+                    
                     bool isRecognitionAvailable = speechRecognizerClass.CallStatic<bool>("isRecognitionAvailable", activity);
                     if (!isRecognitionAvailable)
                     {
-                        Debug.LogError("Speech recognition is not available on this device.");
+                        Debug.LogError("Speech recognition not available on this device");
                         return;
                     }
-
+                    
                     speechRecognizer = speechRecognizerClass.CallStatic<AndroidJavaObject>("createSpeechRecognizer", activity);
-
-                    // Create the recognition listener
-                    AndroidJavaProxy listener = new SpeechRecognitionListener(this);
+                    
+                    if (speechRecognizer == null)
+                    {
+                        Debug.LogError("Failed to create speech recognizer");
+                        return;
+                    }
+                    
+                    // Create recognition listener
+                    SpeechRecognitionListener listener = new SpeechRecognitionListener(this);
                     speechRecognizer.Call("setRecognitionListener", listener);
                     
-                    // Create and configure the intent
+                    // Create and configure intent
                     AndroidJavaClass recognizerIntent = new AndroidJavaClass("android.speech.RecognizerIntent");
                     speechRecognizerIntent = new AndroidJavaObject("android.content.Intent", 
                         recognizerIntent.GetStatic<string>("ACTION_RECOGNIZE_SPEECH"));
@@ -217,73 +289,60 @@ public class VoiceRecognitionHelper : MonoBehaviour
                         recognizerIntent.GetStatic<string>("LANGUAGE_MODEL_FREE_FORM"));
                         
                     speechRecognizerIntent.Call<AndroidJavaObject>("putExtra",
-                        recognizerIntent.GetStatic<string>("EXTRA_PARTIAL_RESULTS"),
-                        true);
+                        recognizerIntent.GetStatic<string>("EXTRA_PARTIAL_RESULTS"), true);
                         
                     speechRecognizerIntent.Call<AndroidJavaObject>("putExtra",
-                        recognizerIntent.GetStatic<string>("EXTRA_MAX_RESULTS"),
-                        5);
+                        recognizerIntent.GetStatic<string>("EXTRA_MAX_RESULTS"), 5);
                         
                     speechRecognizerIntent.Call<AndroidJavaObject>("putExtra",
                         recognizerIntent.GetStatic<string>("EXTRA_CALLING_PACKAGE"),
                         activity.Call<string>("getPackageName"));
+                    
+                    isInitialized = true;
+                    Debug.Log("Android speech recognizer initialized successfully");
                 }
             }
-            
-            isInitialized = true;
-            Debug.Log("Voice recognition initialized successfully");
         }
         catch (Exception e)
         {
-            Debug.LogError("Error initializing voice recognition: " + e.Message + "\n" + e.StackTrace);
+            Debug.LogError("Error initializing Android speech recognizer: " + e.Message);
             PlayErrorSound();
         }
-        #else
-        // Simulated initialization for editor testing
-        isInitialized = true;
-        Debug.Log("Voice recognition simulated in Unity Editor");
-        #endif
     }
-    
-    private IEnumerator RetryInitializationAfterPermission()
-    {
-        yield return new WaitForSeconds(2.0f);
-        Initialize();
-    }
+#endif
 
     public void StartListening()
     {
-        Debug.Log("StartListening called. isInitialized: " + isInitialized + ", isListening: " + isListening);
+        Debug.Log("StartListening called. Initialized: " + isInitialized + ", Listening: " + isListening);
         
         if (!isInitialized)
         {
-            Debug.LogWarning("Voice recognition not initialized. Attempting to initialize...");
+            Debug.LogWarning("Voice recognition not initialized");
             Initialize();
             return;
         }
         
         if (isListening)
         {
-            Debug.Log("Already listening, ignoring request");
+            Debug.Log("Already listening");
             return;
         }
-                
+        
         // Play feedback sound
         if (audioSource != null && startListeningSound != null)
         {
             audioSource.PlayOneShot(startListeningSound);
         }
         
-        #if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
             if (speechRecognizer != null && speechRecognizerIntent != null)
             {
-                // Start listening
+                Debug.Log("Starting Android speech recognition");
                 speechRecognizer.Call("startListening", speechRecognizerIntent);
                 isListening = true;
                 
-                // Start timeout coroutine
                 StartCoroutine(ListeningTimeout());
                 
                 if (showDebugInfo)
@@ -291,25 +350,21 @@ public class VoiceRecognitionHelper : MonoBehaviour
             }
             else
             {
-                Debug.LogError("Speech recognizer or intent is null. Re-initializing...");
+                Debug.LogError("Speech recognizer or intent is null");
                 Initialize();
             }
         }
         catch (Exception e)
         {
-            Debug.LogError("Error starting speech recognition: " + e.Message + "\n" + e.StackTrace);
+            Debug.LogError("Error starting speech recognition: " + e.Message);
             PlayErrorSound();
             isListening = false;
         }
-        #endif
-
-        #if UNITY_EDITOR
-        // Simulate listening in editor with a test command after a delay
+#else
+        // Editor simulation
         isListening = true;
         StartCoroutine(SimulateCommand());
-        #endif
-        
-        Debug.Log("StartListening completed. isListening: " + isListening);
+#endif
     }
     
     public void StopListening()
@@ -317,43 +372,38 @@ public class VoiceRecognitionHelper : MonoBehaviour
         if (!isListening)
             return;
             
-        // Play feedback sound
         if (audioSource != null && stopListeningSound != null)
         {
             audioSource.PlayOneShot(stopListeningSound);
         }
         
-        #if UNITY_ANDROID && !UNITY_EDITOR
+#if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
             if (speechRecognizer != null)
             {
-                // Stop listening
                 speechRecognizer.Call("stopListening");
                 isListening = false;
                 
                 if (showDebugInfo)
-                    Debug.Log("Voice recognition stopped listening");
+                    Debug.Log("Voice recognition stopped");
             }
         }
         catch (Exception e)
         {
             Debug.LogError("Error stopping speech recognition: " + e.Message);
-            PlayErrorSound();
         }
-        #endif
-
-        #if UNITY_EDITOR
-        // End simulated listening in editor
+#else
         isListening = false;
-        #endif
+#endif
     }
     
     public void StartAutoListening()
     {
-        if (autoListenCoroutine == null)
+        if (autoListenCoroutine == null && isInitialized)
         {
             autoListenCoroutine = StartCoroutine(AutoListenCoroutine());
+            Debug.Log("Auto-listening started");
         }
     }
     
@@ -363,6 +413,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
         {
             StopCoroutine(autoListenCoroutine);
             autoListenCoroutine = null;
+            Debug.Log("Auto-listening stopped");
         }
     }
     
@@ -391,47 +442,38 @@ public class VoiceRecognitionHelper : MonoBehaviour
         }
     }
     
-    #if UNITY_EDITOR
+#if UNITY_EDITOR
     private IEnumerator SimulateCommand()
     {
-        // Wait a random amount of time (1 to 3 seconds)
-        yield return new WaitForSeconds(UnityEngine.Random.Range(1.0f, 3.0f));
+        yield return new WaitForSeconds(UnityEngine.Random.Range(2.0f, 4.0f));
         
-        // Pick a random command for testing
         if (predefinedCommands != null && predefinedCommands.Length > 0)
         {
             int randomIndex = UnityEngine.Random.Range(0, predefinedCommands.Length);
             string simulatedCommand = predefinedCommands[randomIndex].command;
             
             Debug.Log("Simulated voice command: " + simulatedCommand);
-            
-            // Process the command
             OnRecognizedSpeech(simulatedCommand);
         }
         
         isListening = false;
     }
-    #endif
+#endif
     
-    // Called when speech is recognized
     public void OnRecognizedSpeech(string rawCommand)
     {
-        // Play feedback sound
         if (audioSource != null && recognizedCommandSound != null)
         {
             audioSource.PlayOneShot(recognizedCommandSound);
         }
         
-        // Process and match the command
         string matchedCommand = ProcessCommand(rawCommand);
-        
         lastRecognizedCommand = matchedCommand;
         isListening = false;
         
         if (showDebugInfo)
-            Debug.Log("Voice command recognized: '" + rawCommand + "' -> matched: '" + matchedCommand + "'");
+            Debug.Log("Voice command: '" + rawCommand + "' -> '" + matchedCommand + "'");
         
-        // Trigger the event
         if (!string.IsNullOrEmpty(matchedCommand))
         {
             OnCommandRecognized.Invoke(matchedCommand);
@@ -448,19 +490,16 @@ public class VoiceRecognitionHelper : MonoBehaviour
         if (string.IsNullOrEmpty(rawCommand) || predefinedCommands == null)
             return "";
             
-        // Convert to lowercase for comparison
         string lowerCommand = rawCommand.ToLower().Trim();
         
-        // Try to match against predefined commands
+        // Direct matches first
         foreach (var command in predefinedCommands)
         {
-            // Check main command
             if (lowerCommand.Contains(command.command.ToLower()))
             {
                 return command.command;
             }
             
-            // Check alternate commands
             if (command.alternateCommands != null)
             {
                 foreach (var alt in command.alternateCommands)
@@ -473,7 +512,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
             }
         }
         
-        // Try partial matching for better recognition
+        // Partial matching
         foreach (var command in predefinedCommands)
         {
             string[] commandWords = command.command.ToLower().Split(' ');
@@ -487,14 +526,13 @@ public class VoiceRecognitionHelper : MonoBehaviour
                 }
             }
             
-            // If we matched more than half the words, consider it a match
             if (matchedWords > 0 && (float)matchedWords / commandWords.Length >= 0.5f)
             {
                 return command.command;
             }
         }
         
-        return ""; // No match found
+        return "";
     }
     
     private void PlayErrorSound()
@@ -505,76 +543,36 @@ public class VoiceRecognitionHelper : MonoBehaviour
         }
     }
     
+    public bool IsListening() { return isListening; }
+    public bool IsInitialized() { return isInitialized; }
+    public string GetLastRecognizedCommand() { return lastRecognizedCommand; }
+    
     void OnDestroy()
     {
-        // Stop auto-listening
         StopAutoListening();
         
-        // Clean up the speech recognizer
-        if (isInitialized)
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (speechRecognizer != null)
         {
-            #if UNITY_ANDROID && !UNITY_EDITOR
-            if (speechRecognizer != null)
+            try
             {
-                try
-                {
-                    speechRecognizer.Call("destroy");
-                    speechRecognizer.Dispose();
-                    speechRecognizer = null;
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError("Error destroying speech recognizer: " + e.Message);
-                }
+                speechRecognizer.Call("destroy");
+                speechRecognizer.Dispose();
             }
-            
-            if (speechRecognizerIntent != null)
+            catch (Exception e)
             {
-                speechRecognizerIntent.Dispose();
-                speechRecognizerIntent = null;
+                Debug.LogError("Error destroying speech recognizer: " + e.Message);
             }
-            #endif
-        }
-    }
-    
-    // Utility methods
-    public string GetAvailableCommandsText()
-    {
-        if (predefinedCommands == null || predefinedCommands.Length == 0)
-            return "No voice commands available.";
-            
-        string commandsText = "Available voice commands:\n";
-        
-        foreach (var command in predefinedCommands)
-        {
-            commandsText += "• \"" + command.command + "\"";
-            if (!string.IsNullOrEmpty(command.description))
-            {
-                commandsText += " - " + command.description;
-            }
-            commandsText += "\n";
         }
         
-        return commandsText;
-    }
-    
-    public bool IsListening()
-    {
-        return isListening;
-    }
-    
-    public bool IsInitialized()
-    {
-        return isInitialized;
-    }
-    
-    public string GetLastRecognizedCommand()
-    {
-        return lastRecognizedCommand;
+        if (speechRecognizerIntent != null)
+        {
+            speechRecognizerIntent.Dispose();
+        }
+#endif
     }
 }
 
-// Separate class for the Android speech recognition listener
 #if UNITY_ANDROID && !UNITY_EDITOR
 public class SpeechRecognitionListener : AndroidJavaProxy
 {
@@ -595,8 +593,8 @@ public class SpeechRecognitionListener : AndroidJavaProxy
             if (size > 0)
             {
                 string command = matches.Call<string>("get", 0);
+                Debug.Log("Speech recognized: " + command);
                 
-                // Use Unity's main thread dispatcher
                 UnityMainThreadDispatcher.Instance().Enqueue(() => {
                     helper.OnRecognizedSpeech(command);
                 });
@@ -629,19 +627,15 @@ public class SpeechRecognitionListener : AndroidJavaProxy
     }
     
     void onRmsChanged(float rmsdB) { }
-    
     void onBufferReceived(byte[] buffer) { }
-    
     void onEndOfSpeech() 
     {
         Debug.Log("End of speech");
+        UnityMainThreadDispatcher.Instance().Enqueue(() => {
+            helper.StopListening();
+        });
     }
-    
-    void onPartialResults(AndroidJavaObject bundle) 
-    {
-        // Handle partial results if needed
-    }
-    
+    void onPartialResults(AndroidJavaObject bundle) { }
     void onEvent(int eventType, AndroidJavaObject bundle) { }
     
     private string GetErrorMessage(int error)

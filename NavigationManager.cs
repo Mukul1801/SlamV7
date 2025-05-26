@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -12,7 +12,8 @@ public class NavigationManager : MonoBehaviour
     public SafePathPlanner safePathPlanner;
     public AudioSource audioSource;
     public TextToSpeech textToSpeech;
-    public NavigationEnhancer navigationEnhancer; // Changed from NavigationHelper to NavigationEnhancer
+    public NavigationEnhancer navigationEnhancer;
+    private Enhanced3DMapManager enhanced3DMapManager; // New integration
 
     [Header("Audio Feedback")]
     public AudioClip waypointReachedSound;
@@ -23,13 +24,13 @@ public class NavigationManager : MonoBehaviour
     public AudioClip obstacleNearbySound;
     public AudioClip pathStartedSound;
     public AudioClip errorSound;
-    public AudioClip beaconSound; // Continuous audio to indicate path direction
+    public AudioClip beaconSound;
     
     [Header("3D Audio")]
     public bool use3DAudio = true;
     public float maxAudioDistance = 20f;
     public Transform audioSourceTransform;
-    public AudioSource beaconAudioSource; // Separate source for continuous guidance sound
+    public AudioSource beaconAudioSource;
 
     [Header("Haptic Feedback")]
     public bool useVibration = true;
@@ -43,26 +44,26 @@ public class NavigationManager : MonoBehaviour
     public bool isNavigating = false;
     public bool useDistanceBasedGuidance = true;
     public float minDistanceForUpdate = 0.5f;
-    public float turnAngleThreshold = 15f; // Degrees threshold to identify a turn
+    public float turnAngleThreshold = 15f;
 
     [Header("Accessibility")]
     public bool useDetailedAudioDescriptions = true;
-    public bool useCoarseSpatialNavigation = false; // Simpler directions for users with severe visual impairment
+    public bool useCoarseSpatialNavigation = false;
     public TextMeshProUGUI debugTextDisplay;
     public bool enableTapForNextDirection = true;
-    public float hazardProximityWarningFrequency = 0.5f; // Seconds between warnings when near obstacles
-    public int hapticFeedbackMode = 1; // 0 = off, 1 = basic, 2 = advanced patterns
-    public bool useContinuousBeacon = true; // Use beacon sound to indicate path direction
-    public bool useRightOrLeftCalls = true; // Call out right or left for directions
+    public float hazardProximityWarningFrequency = 0.5f;
+    public int hapticFeedbackMode = 1;
+    public bool useContinuousBeacon = true;
+    public bool useRightOrLeftCalls = true;
 
     [Header("Advanced Settings")]
-    public bool useProgressiveGuidance = true; // More detailed guidance when moving slowly
-    public float userSpeedThreshold = 0.5f; // m/s, threshold to determine if user is moving slowly
-    public float pathCompletionAnnouncementDistance = 5.0f; // Start announcing distance to destination
+    public bool useProgressiveGuidance = true;
+    public float userSpeedThreshold = 0.5f;
+    public float pathCompletionAnnouncementDistance = 5.0f;
     public float beaconMinimumVolume = 0.1f;
     public float beaconMaximumVolume = 0.7f;
     public bool announceLandmarks = true;
-    public float environmentAnnouncementInterval = 20f; // Seconds between environment descriptions
+    public float environmentAnnouncementInterval = 20f;
 
     // Private state variables
     private float lastDirectionUpdate = 0f;
@@ -72,7 +73,7 @@ public class NavigationManager : MonoBehaviour
     private float lastUserSpeed = 0f;
     private float lastObstacleWarningTime = 0f;
     private string debugText = "";
-    private List<string> spokenDirections = new List<string>(); // Avoid repeating the same instruction
+    private List<string> spokenDirections = new List<string>();
     private bool destinationAnnouncementStarted = false;
     private bool isBeaconActive = false;
     private Coroutine beaconCoroutine;
@@ -107,6 +108,9 @@ public class NavigationManager : MonoBehaviour
         if (navigationEnhancer == null)
             navigationEnhancer = FindObjectOfType<NavigationEnhancer>();
 
+        // NEW: Integrate with Enhanced3DMapManager
+        IntegrateWith3DMapManager();
+
         // Initialize NavigationEnhancer reference if available
         if (navigationEnhancer != null)
         {
@@ -133,7 +137,7 @@ public class NavigationManager : MonoBehaviour
             beaconObj.transform.parent = transform;
             beaconAudioSource = beaconObj.AddComponent<AudioSource>();
             beaconAudioSource.loop = true;
-            beaconAudioSource.spatialBlend = 1.0f; // Always use 3D audio for beacon
+            beaconAudioSource.spatialBlend = 1.0f;
             beaconAudioSource.rolloffMode = AudioRolloffMode.Linear;
             beaconAudioSource.minDistance = 1.0f;
             beaconAudioSource.maxDistance = maxAudioDistance * 1.5f;
@@ -154,6 +158,16 @@ public class NavigationManager : MonoBehaviour
         lastUserPosition = Camera.main.transform.position;
     }
 
+    // NEW: Integration method for Enhanced3DMapManager
+    public void IntegrateWith3DMapManager()
+    {
+        enhanced3DMapManager = FindObjectOfType<Enhanced3DMapManager>();
+        if (enhanced3DMapManager != null)
+        {
+            Debug.Log("NavigationManager integrated with Enhanced3DMapManager");
+        }
+    }
+
     void Update()
     {
         if (isNavigating)
@@ -165,26 +179,31 @@ public class NavigationManager : MonoBehaviour
             lastUserSpeed = distanceMoved / deltaTime;
             lastUserPosition = userPosition;
 
-            // Update navigation
-            NavigateAlongPath();
-
-            // Update audio beacon
-            UpdateBeacon();
+            // Check if we should use enhanced navigation
+            if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
+            {
+                // Enhanced3DMapManager is handling navigation, just provide audio support
+                UpdateBeacon();
+            }
+            else
+            {
+                // Use traditional navigation
+                NavigateAlongPath();
+                UpdateBeacon();
+            }
 
             // Check for tap input if enabled
             if (enableTapForNextDirection && Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
             {
-                // Check if tap is on UI element
                 bool isTapOnUI = UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(Input.GetTouch(0).fingerId);
 
-                // If not on UI, provide next direction
                 if (!isTapOnUI)
                 {
-                    GiveDirectionToNextPathPoint(true); // Force an update
+                    GiveDirectionToNextPathPoint(true);
                 }
             }
 
-            // Periodic environment descriptions - use NavigationEnhancer if available
+            // Periodic environment descriptions
             if (Time.time - lastEnvironmentAnnouncement > environmentAnnouncementInterval)
             {
                 if (navigationEnhancer != null)
@@ -204,6 +223,15 @@ public class NavigationManager : MonoBehaviour
 
     public void StartNavigation()
     {
+        // NEW: Check if Enhanced3DMapManager should handle navigation
+        if (enhanced3DMapManager != null && enhanced3DMapManager.GetCurrentMap() != null)
+        {
+            enhanced3DMapManager.StartEnhancedNavigation();
+            isNavigating = true; // Set this for compatibility
+            SpeakMessage("Starting enhanced navigation with 3D mapping.");
+            return;
+        }
+
         // Use NavigationEnhancer if available and map is validated
         if (navigationEnhancer != null && navigationEnhancer.IsMapValidForNavigation())
         {
@@ -214,16 +242,13 @@ public class NavigationManager : MonoBehaviour
         // Regular navigation start
         if (hitPointManager.poseClassList.Count > 0)
         {
-            // First check if we have at least start and end points
             bool hasStartPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.StartPoint);
             bool hasEndPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.EndPoint);
 
             if (!hasStartPoint || !hasEndPoint)
             {
-                // If not explicitly defined, check if we can use first and last points
                 if (hitPointManager.poseClassList.Count >= 2)
                 {
-                    // Use first point as start and last point as end
                     hitPointManager.poseClassList[0].waypointType = WaypointType.StartPoint;
                     hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
 
@@ -237,7 +262,6 @@ public class NavigationManager : MonoBehaviour
                 }
             }
 
-            // Plan safe path
             bool pathPlanned = safePathPlanner.PlanSafePath();
 
             if (pathPlanned)
@@ -247,31 +271,24 @@ public class NavigationManager : MonoBehaviour
                 destinationAnnouncementStarted = false;
                 lastEnvironmentAnnouncement = Time.time;
 
-                // Clear previous spoken directions
                 spokenDirections.Clear();
 
-                // Play start sound
                 PlaySound(pathStartedSound);
 
-                // Announce start of navigation
                 SpeakMessage("Navigation started. Follow the audio cues to safely reach your destination.");
 
-                // Start beacon if enabled
                 if (useContinuousBeacon)
                 {
                     StartBeacon();
                 }
 
-                // Vibrate to signal start
                 if (useVibration)
                     Vibrate();
 
-                // First direction update
                 GiveDirectionToNextPathPoint(true);
 
                 UpdateDebugText("Navigation active - follow audio cues.");
                 
-                // Provide path description
                 if (navigationEnhancer != null && useDetailedAudioDescriptions)
                 {
                     StartCoroutine(DelayedPathDescription(3.0f));
@@ -296,7 +313,6 @@ public class NavigationManager : MonoBehaviour
     {
         yield return new WaitForSeconds(delay);
         
-        // Use NavigationEnhancer for path description if available
         if (navigationEnhancer != null)
         {
             navigationEnhancer.DescribePathQuality();
@@ -309,10 +325,14 @@ public class NavigationManager : MonoBehaviour
         {
             isNavigating = false;
 
-            // Stop audio beacon
+            // NEW: Stop enhanced navigation if active
+            if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
+            {
+                enhanced3DMapManager.StopNavigation();
+            }
+
             StopBeacon();
 
-            // Stop any ongoing speech
             if (textToSpeech != null)
                 textToSpeech.StopSpeaking();
 
@@ -325,21 +345,17 @@ public class NavigationManager : MonoBehaviour
     {
         Vector3 userPosition = Camera.main.transform.position;
 
-        // Update which path point we're heading toward
         int previousPathIndex = safePathPlanner.GetCurrentPathIndex();
         safePathPlanner.UpdateCurrentPathIndex(userPosition);
         int currentPathIndex = safePathPlanner.GetCurrentPathIndex();
 
-        // Check if we've progressed to a new waypoint
         if (currentPathIndex > previousPathIndex && waypointAnnouncementNeeded)
         {
             AnnounceWaypointReached();
         }
 
-        // Get the next path point to move toward
         Vector3 nextPathPoint = safePathPlanner.GetNextPathPoint();
 
-        // Calculate distance to current target (horizontal plane only)
         Vector3 horizontalUserPosition = new Vector3(userPosition.x, 0, userPosition.z);
         Vector3 horizontalPathPoint = new Vector3(nextPathPoint.x, 0, nextPathPoint.z);
         float distance = Vector3.Distance(horizontalUserPosition, horizontalPathPoint);
@@ -347,22 +363,18 @@ public class NavigationManager : MonoBehaviour
         UpdateDebugText("Distance to next point: " + distance.ToString("F2") + "m\n" +
                         "Speed: " + lastUserSpeed.ToString("F2") + "m/s");
 
-        // Check for nearby obstacles and warn if needed
         if (Time.time - lastObstacleWarningTime > hazardProximityWarningFrequency)
         {
             WarnAboutNearbyObstacles(userPosition);
             lastObstacleWarningTime = Time.time;
         }
 
-        // Update direction guidance based on configured conditions
         bool shouldUpdate = false;
 
         if (useDistanceBasedGuidance)
         {
-            // Update based on how far the user has moved
             float distanceMoved = Vector3.Distance(lastUpdatePosition, userPosition);
 
-            // Update if we've moved enough or if we're moving slowly and using progressive guidance
             if (distanceMoved > minDistanceForUpdate ||
                 (useProgressiveGuidance && lastUserSpeed < userSpeedThreshold && Time.time - lastDirectionUpdate > directionUpdateFrequency * 2))
             {
@@ -372,7 +384,6 @@ public class NavigationManager : MonoBehaviour
         }
         else
         {
-            // Update based on time frequency
             if (Time.time - lastDirectionUpdate > directionUpdateFrequency)
             {
                 shouldUpdate = true;
@@ -385,10 +396,8 @@ public class NavigationManager : MonoBehaviour
             lastDirectionUpdate = Time.time;
         }
 
-        // Check if destination reached
         CheckDestinationReached(userPosition);
 
-        // Check if we should start announcing approach to destination
         if (!destinationAnnouncementStarted)
         {
             PoseClass endPose = hitPointManager.poseClassList.FirstOrDefault(p => p.waypointType == WaypointType.EndPoint);
@@ -413,7 +422,6 @@ public class NavigationManager : MonoBehaviour
         bool obstacleWarningGiven = false;
         List<PoseClass> nearbyObstacles = new List<PoseClass>();
 
-        // Check distance to all obstacles
         foreach (var pose in hitPointManager.poseClassList)
         {
             if (pose.waypointType == WaypointType.Obstacle)
@@ -424,46 +432,35 @@ public class NavigationManager : MonoBehaviour
 
                 if (obstacleDistance < obstacleWarningDistance)
                 {
-                    // Add to nearby obstacles
                     nearbyObstacles.Add(pose);
                 }
             }
         }
 
-        // If multiple obstacles are nearby, warn about the closest one
         if (nearbyObstacles.Count > 0)
         {
-            // Sort by distance
             nearbyObstacles.Sort((a, b) =>
                 Vector3.Distance(userPosition, a.position).CompareTo(
                 Vector3.Distance(userPosition, b.position)));
 
-            // Get closest obstacle
             PoseClass closestObstacle = nearbyObstacles[0];
             float obstacleDistance = Vector3.Distance(userPosition, closestObstacle.position);
 
-            // Determine direction to obstacle
             Vector3 directionToObstacle = closestObstacle.position - userPosition;
             directionToObstacle.y = 0;
 
-            // Get user's forward direction
             Vector3 userForward = Camera.main.transform.forward;
             userForward.y = 0;
             userForward.Normalize();
 
-            // Calculate angle between user's forward and obstacle
             float angle = Vector3.SignedAngle(userForward, directionToObstacle, Vector3.up);
 
-            // Determine verbal direction
             string direction = GetDirectionName(angle);
 
-            // Only warn if obstacle is somewhat in front of user (within about 120 degrees)
             if (Mathf.Abs(angle) < 60f)
             {
-                // Play obstacle warning sound with volume based on proximity
                 float warningVolume = Mathf.Lerp(0.3f, 1.0f, 1.0f - (obstacleDistance / obstacleWarningDistance));
                 
-                // Set 3D position of sound if using 3D audio
                 if (use3DAudio && audioSource != null)
                 {
                     audioSource.transform.position = closestObstacle.position;
@@ -472,19 +469,17 @@ public class NavigationManager : MonoBehaviour
                 PlaySound(obstacleNearbySound, warningVolume);
                 obstacleWarningGiven = true;
 
-                // Vibrate with intensity based on proximity
                 if (useVibration)
                 {
                     float intensity = Mathf.Lerp(0.3f, 1.0f, 1.0f - (obstacleDistance / obstacleWarningDistance));
                     
-                    // Use different patterns based on obstacle direction
                     if (hapticFeedbackMode == 2)
                     {
-                        if (angle < -30f) // Left
+                        if (angle < -30f)
                             VibratePattern(new float[] { intensity, 0.1f, 0, 0.1f, intensity, 0.2f });
-                        else if (angle > 30f) // Right
+                        else if (angle > 30f)
                             VibratePattern(new float[] { intensity, 0.2f, 0, 0.1f, intensity, 0.1f });
-                        else // Center
+                        else
                             Vibrate(intensity);
                     }
                     else
@@ -493,7 +488,6 @@ public class NavigationManager : MonoBehaviour
                     }
                 }
 
-                // Speak warning message
                 string intensityWord = "";
                 if (obstacleDistance < 1.0f)
                     intensityWord = "very close ";
@@ -503,7 +497,6 @@ public class NavigationManager : MonoBehaviour
                 SpeakMessage("Caution! " + intensityWord + "Obstacle " + direction + ", " +
                              obstacleDistance.ToString("F1") + " meters away.");
 
-                // Update debug text
                 UpdateDebugText("⚠️ Obstacle " + direction + ": " + obstacleDistance.ToString("F1") + "m");
             }
         }
@@ -517,12 +510,10 @@ public class NavigationManager : MonoBehaviour
             Vector3 enhancedUserPos = Camera.main.transform.position;
             Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
             
-            // Get user's forward direction
             Vector3 enhancedUserFwd = Camera.main.transform.forward;
             enhancedUserFwd.y = 0;
             enhancedUserFwd.Normalize();
             
-            // Get direction to next point
             Vector3 directionToPoint = nextPoint - enhancedUserPos;
             directionToPoint.y = 0;
             
@@ -530,11 +521,9 @@ public class NavigationManager : MonoBehaviour
             {
                 directionToPoint.Normalize();
                 
-                // Calculate angle and distance
                 float enhancedAngle = Vector3.SignedAngle(enhancedUserFwd, directionToPoint, Vector3.up);
                 float enhancedDistance = Vector3.Distance(enhancedUserPos, nextPoint);
                 
-                // Use enhanced directions
                 navigationEnhancer.ProvideEnhancedDirections(enhancedUserPos, nextPoint, enhancedAngle, enhancedDistance);
                 return;
             }
@@ -545,48 +534,38 @@ public class NavigationManager : MonoBehaviour
         int currentPathIndex = safePathPlanner.GetCurrentPathIndex();
         bool isLastPoint = currentPathIndex >= safePathPlanner.GetPathCount() - 1;
 
-        // Get user's current position and forward direction
         Transform cameraTransform = Camera.main.transform;
         Vector3 userPosition = cameraTransform.position;
         Vector3 userForward = cameraTransform.forward;
-        userForward.y = 0; // Ignore vertical component for direction calculation
+        userForward.y = 0;
         userForward.Normalize();
 
-        // Get direction to next path point
         Vector3 directionToPathPoint = nextPathPoint - userPosition;
-        directionToPathPoint.y = 0; // Ignore vertical component
+        directionToPathPoint.y = 0;
 
-        // Skip if direction is zero (we're at the point)
         if (directionToPathPoint.magnitude < 0.1f && !forceUpdate)
             return;
 
         directionToPathPoint.Normalize();
 
-        // Calculate angle between user's forward direction and path point direction
         float angle = Vector3.SignedAngle(userForward, directionToPathPoint, Vector3.up);
 
-        // Determine verbal direction based on angle
         string direction = GetDirectionName(angle);
         AudioClip directionSound = GetDirectionSound(angle);
 
-        // Calculate distance to path point
         float distance = Vector3.Distance(userPosition, nextPathPoint);
         string distanceStr = distance.ToString("F1");
 
-        // Determine if this is a significant turn
         bool isSignificantTurn = Mathf.Abs(angle) > turnAngleThreshold;
 
-        // Create directional message
         string directionMessage;
 
-        // Different message format for last point (destination)
         if (isLastPoint)
         {
             directionMessage = "Your destination is " + direction + ", " + distanceStr + " meters away.";
         }
         else
         {
-            // Get turns and obstacles along the path
             string pathDescription = "";
             if (useProgressiveGuidance && lastUserSpeed < userSpeedThreshold)
             {
@@ -599,27 +578,22 @@ public class NavigationManager : MonoBehaviour
 
             if (useCoarseSpatialNavigation)
             {
-                // Simpler directions for severe visual impairment
                 directionMessage = "Go " + direction + ", " + distanceStr + " meters.";
             }
             else if (isSignificantTurn)
             {
-                // More emphasis on the turn
                 directionMessage = "Turn " + direction + " and continue for " + distanceStr + " meters." + pathDescription;
             }
             else
             {
-                // Standard directional guidance
                 directionMessage = "Continue " + direction + " for " + distanceStr + " meters." + pathDescription;
             }
             
-            // Store waypoint description for announcement when reached
             if (currentPathIndex < safePathPlanner.GetPathCount() - 1)
             {
                 waypointAnnouncementNeeded = true;
                 nextWaypointDescription = "Waypoint reached. ";
                 
-                // Check if we have any obstacles to note
                 int nextObstacleCount = CountNearbyObstacles(nextPathPoint, 3.0f);
                 if (nextObstacleCount > 0)
                 {
@@ -628,7 +602,6 @@ public class NavigationManager : MonoBehaviour
                         : "There are " + nextObstacleCount + " obstacles nearby. ";
                 }
                 
-                // Check if next segment has a significant turn
                 if (currentPathIndex + 1 < safePathPlanner.GetPathCount() - 1)
                 {
                     Vector3 pointAfterNext = safePathPlanner.GetPathPointAt(currentPathIndex + 2);
@@ -647,46 +620,36 @@ public class NavigationManager : MonoBehaviour
             }
         }
 
-        // Check if this is identical to the last direction given, if so don't repeat unless forced
         if (forceUpdate || !spokenDirections.Contains(directionMessage))
         {
-            // Update debug information
             UpdateDebugText("Next point: " + distance.ToString("F1") + "m" +
                             "\nDirection: " + direction +
                             "\nAngle: " + angle.ToString("F0") + "°");
 
-            // Add to spoken directions history (limit to last 5 directions)
             spokenDirections.Add(directionMessage);
             if (spokenDirections.Count > 5)
                 spokenDirections.RemoveAt(0);
 
-            // Speak direction to user
             SpeakMessage(directionMessage);
 
-            // If using 3D audio, position the sound at the next waypoint
             if (use3DAudio && audioSource != null)
             {
                 audioSource.transform.position = nextPathPoint;
             }
 
-            // Play direction sound
             if (directionSound != null)
                 PlaySound(directionSound);
 
-            // Vibrate for significant turns
             if (useVibration && isSignificantTurn)
             {
                 if (hapticFeedbackMode == 2)
                 {
-                    // Different vibration patterns based on direction
                     if (angle < -turnAngleThreshold)
                     {
-                        // Left turn - two short vibrations
                         VibratePattern(new float[] { 0.8f, 0.1f, 0, 0.1f, 0.8f, 0.1f });
                     }
                     else if (angle > turnAngleThreshold)
                     {
-                        // Right turn - one long vibration
                         VibratePattern(new float[] { 0.8f, 0.3f });
                     }
                 }
@@ -720,22 +683,18 @@ public class NavigationManager : MonoBehaviour
 
     private void AnnounceWaypointReached()
     {
-        // Play waypoint reached sound
         PlaySound(waypointReachedSound);
         
-        // Vibrate if enabled
         if (useVibration && hapticFeedbackMode >= 1)
         {
             Vibrate(0.6f, 0.15f);
         }
         
-        // Speak the waypoint announcement
         if (!string.IsNullOrEmpty(nextWaypointDescription))
         {
             SpeakMessage(nextWaypointDescription);
         }
         
-        // Reset flag
         waypointAnnouncementNeeded = false;
         nextWaypointDescription = "";
     }
@@ -744,7 +703,6 @@ public class NavigationManager : MonoBehaviour
     {
         if (useCoarseSpatialNavigation)
         {
-            // Simpler 8-point directions for severe visual impairment
             if (Mathf.Abs(angle) < 22.5f)
             {
                 return "straight ahead";
@@ -780,7 +738,6 @@ public class NavigationManager : MonoBehaviour
         }
         else
         {
-            // More precise directions
             if (Mathf.Abs(angle) < 10f)
             {
                 return "straight ahead";
@@ -844,13 +801,12 @@ public class NavigationManager : MonoBehaviour
     {
         if (beaconAudioSource != null && beaconSound != null)
         {
-            StopBeacon(); // Stop any existing beacon
+            StopBeacon();
             
             isBeaconActive = true;
             beaconAudioSource.clip = beaconSound;
             beaconAudioSource.Play();
             
-            // Start coroutine to update beacon position
             beaconCoroutine = StartCoroutine(UpdateBeaconPosition());
         }
     }
@@ -874,12 +830,10 @@ public class NavigationManager : MonoBehaviour
     {
         while (isBeaconActive && isNavigating)
         {
-            // Update position of beacon to next waypoint
             if (safePathPlanner != null && safePathPlanner.GetPathCount() > safePathPlanner.GetCurrentPathIndex())
             {
                 Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
                 
-                // Look ahead to further waypoints for a more stable beacon
                 int lookAheadCount = Mathf.Min(3, safePathPlanner.GetPathCount() - safePathPlanner.GetCurrentPathIndex() - 1);
                 if (lookAheadCount > 0)
                 {
@@ -902,26 +856,21 @@ public class NavigationManager : MonoBehaviour
         if (!isBeaconActive || beaconAudioSource == null)
             return;
             
-        // Adjust volume based on whether user is facing the right direction
         if (safePathPlanner != null && safePathPlanner.GetPathCount() > safePathPlanner.GetCurrentPathIndex())
         {
             Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
             Vector3 userPos = Camera.main.transform.position;
             
-            // Direction to next point
             Vector3 directionToPoint = nextPoint - userPos;
             directionToPoint.y = 0;
             directionToPoint.Normalize();
             
-            // User's forward direction
             Vector3 userForward = Camera.main.transform.forward;
             userForward.y = 0;
             userForward.Normalize();
             
-            // Calculate how well user is facing the next point
             float facingDot = Vector3.Dot(userForward, directionToPoint);
             
-            // Adjust volume - louder when facing the right direction
             float targetVolume = Mathf.Lerp(beaconMinimumVolume, beaconMaximumVolume, (facingDot + 1) / 2);
             beaconAudioSource.volume = Mathf.Lerp(beaconAudioSource.volume, targetVolume, Time.deltaTime * 2);
         }
@@ -929,11 +878,9 @@ public class NavigationManager : MonoBehaviour
 
     private void CheckDestinationReached(Vector3 userPosition)
     {
-        // Find end point
         PoseClass endPose = hitPointManager.poseClassList.FirstOrDefault(p => p.waypointType == WaypointType.EndPoint);
         if (endPose == null && hitPointManager.poseClassList.Count > 0)
         {
-            // Use last point if no explicit end point
             endPose = hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1];
         }
 
@@ -945,7 +892,6 @@ public class NavigationManager : MonoBehaviour
 
             if (distanceToDestination < waypointReachedDistance)
             {
-                // Reached destination
                 EndNavigation();
             }
         }
@@ -955,18 +901,14 @@ public class NavigationManager : MonoBehaviour
     {
         isNavigating = false;
 
-        // Stop beacon
         StopBeacon();
 
-        // Play destination reached sound
         PlaySound(destinationReachedSound);
 
-        // Vibrate device if enabled
         if (useVibration)
         {
             if (hapticFeedbackMode == 2)
             {
-                // Special completion pattern
                 VibratePattern(new float[] { 1.0f, 0.2f, 0, 0.1f, 1.0f, 0.2f, 0, 0.1f, 1.0f, 0.3f });
             }
             else
@@ -978,7 +920,6 @@ public class NavigationManager : MonoBehaviour
         SpeakMessage("You have reached your destination safely. Navigation completed.");
         UpdateDebugText("✅ Destination reached!");
 
-        // Reset variables
         destinationAnnouncementStarted = false;
     }
 
@@ -1016,8 +957,6 @@ public class NavigationManager : MonoBehaviour
         }
         else
         {
-            // On Android, there's no direct way to control vibration intensity
-            // So we use a pattern of short vibrations to simulate lower intensity
             long[] pattern = { 0, (long)(duration * 1000 * intensity) };
             using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
             {
@@ -1039,12 +978,10 @@ public class NavigationManager : MonoBehaviour
             return;
 
 #if UNITY_ANDROID && !UNITY_EDITOR
-        // Convert float pattern to long[] pattern expected by Android
-        // Pattern format: [delay1, duration1, delay2, duration2, ...]
         long[] vibrationPattern = new long[pattern.Length];
         for (int i = 0; i < pattern.Length; i++)
         {
-            vibrationPattern[i] = (long)(pattern[i] * 1000); // Convert to milliseconds
+            vibrationPattern[i] = (long)(pattern[i] * 1000);
         }
 
         using (AndroidJavaClass unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
@@ -1065,7 +1002,6 @@ public class NavigationManager : MonoBehaviour
         debugText = text;
     }
 
-    // Method to provide next instruction on demand (for manual triggering)
     public void ProvideNextInstruction()
     {
         if (isNavigating)
@@ -1074,20 +1010,17 @@ public class NavigationManager : MonoBehaviour
         }
         else
         {
-            // If not navigating but NavigationEnhancer is available, use it
             if (navigationEnhancer != null)
             {
                 navigationEnhancer.AnnounceWhatsAhead();
             }
             else
             {
-                // Otherwise provide a basic message
                 SpeakMessage("Navigation is not active. Tap and hold to start navigation or double tap to access the menu.");
             }
         }
     }
 
-    // Function to reset all navigation data
     public void ResetNavigation()
     {
         StopNavigation();

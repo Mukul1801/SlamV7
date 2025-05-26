@@ -13,7 +13,10 @@ public class AccessibilityManager : MonoBehaviour
     public NavigationManager navigationManager;
     public TextToSpeech textToSpeech;
     public Canvas accessibilityCanvas;
-    public NavigationEnhancer navigationEnhancer; // Changed from NavigationHelper to NavigationEnhancer
+    public NavigationEnhancer navigationEnhancer;
+    
+    // NEW: Enhanced 3D Map Manager reference
+    private Enhanced3DMapManager enhanced3DMapManager;
 
     [Header("Gesture Settings")]
     public bool enableGestureControls = true;
@@ -51,6 +54,12 @@ public class AccessibilityManager : MonoBehaviour
     public Button selfVoicingToggleButton;
     public TextMeshProUGUI accessibilityStatusText;
 
+    // NEW: Voice Recognition Integration
+    [Header("Voice Recognition")]
+    public bool enableVoiceCommands = true;
+    public bool enableAutoListening = false;
+    public float voiceCommandTimeout = 5.0f;
+    
     // Gesture state tracking
     private bool isLongPressing = false;
     private float longPressStart = 0f;
@@ -72,7 +81,10 @@ public class AccessibilityManager : MonoBehaviour
     
     // Voice recognition helper
     private VoiceRecognitionHelper voiceRecognitionHelper;
-    public bool enableVoiceCommands = true;
+
+    // NEW: Emergency state management
+    private bool isEmergencyMode = false;
+    private Coroutine emergencyAssistanceCoroutine;
 
     void Start()
     {
@@ -92,9 +104,11 @@ public class AccessibilityManager : MonoBehaviour
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
             
-        // Find NavigationEnhancer
         if (navigationEnhancer == null)
             navigationEnhancer = FindObjectOfType<NavigationEnhancer>();
+            
+        // NEW: Find Enhanced3DMapManager
+        enhanced3DMapManager = FindObjectOfType<Enhanced3DMapManager>();
             
         // Initialize voice recognition if enabled
         if (enableVoiceCommands)
@@ -107,8 +121,14 @@ public class AccessibilityManager : MonoBehaviour
             
             if (voiceRecognitionHelper != null)
             {
-                //voiceRecognitionHelper.Initialize();
                 voiceRecognitionHelper.OnCommandRecognized.AddListener(HandleVoiceCommand);
+                
+                // NEW: Set up auto-listening if enabled
+                if (enableAutoListening)
+                {
+                    voiceRecognitionHelper.autoStartListening = true;
+                    voiceRecognitionHelper.autoListenInterval = 8.0f; // Listen every 8 seconds
+                }
             }
         }
 
@@ -120,63 +140,53 @@ public class AccessibilityManager : MonoBehaviour
             "Toggle high contrast mode",
             "Toggle vibration feedback",
             "Toggle verbose mode",
+            "Voice command settings",
             "Application help",
             "Exit menu"
         };
 
-        // Initialize UI elements
         if (accessibilityMenuPanel != null)
             accessibilityMenuPanel.SetActive(false);
 
-        // Set up button listeners
         SetupButtonListeners();
 
-        // Cache all text and image elements for accessibility adjustments
         CacheUIElements();
 
-        // Initialize accessibility settings
         ApplyTextScaling();
         ApplyContrastMode();
 
-        // Set vibration mode on navigation manager
         if (navigationManager != null)
         {
             navigationManager.useVibration = vibrationEnabled;
             navigationManager.useDetailedAudioDescriptions = verboseMode;
         }
             
-        // Set speech rate and pitch on TTS
         if (textToSpeech != null)
         {
             textToSpeech.speechRate = speechRate;
             textToSpeech.speechPitch = speechPitch;
         }
 
-        // Announce initial instructions after a delay
         if (announceFeatures)
             Invoke("AnnounceInitialInstructions", initialInstructionDelay);
     }
 
     void Update()
     {
-        // Process gesture controls if enabled
         if (enableGestureControls)
             ProcessGestures();
     }
 
     private void ProcessGestures()
     {
-        // Only process gestures if no UI elements are being interacted with
         if (UnityEngine.EventSystems.EventSystem.current != null &&
             UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject())
             return;
 
-        // Get touch input
         if (Input.touchCount > 0)
         {
             Touch touch = Input.GetTouch(0);
 
-            // Handle touch phases
             switch (touch.phase)
             {
                 case TouchPhase.Began:
@@ -186,33 +196,27 @@ public class AccessibilityManager : MonoBehaviour
                     break;
 
                 case TouchPhase.Moved:
-                    // Check if movement exceeds threshold for a swipe
                     float touchDistance = Vector2.Distance(touch.position, touchStartPosition);
                     if (touchDistance > swipeMinDistance)
                     {
-                        // Determine swipe direction
                         Vector2 direction = touch.position - touchStartPosition;
                         ProcessSwipe(direction);
 
-                        // Reset long press detection
                         isLongPressing = false;
                     }
                     break;
 
                 case TouchPhase.Ended:
-                    // Check for tap
                     float touchDuration = Time.time - longPressStart;
 
                     if (isLongPressing)
                     {
                         if (touchDuration >= longPressTime)
                         {
-                            // Long press detected
                             ProcessLongPress(touch.position);
                         }
                         else
                         {
-                            // Short tap detected
                             ProcessTap(touch.position);
                         }
                     }
@@ -225,7 +229,6 @@ public class AccessibilityManager : MonoBehaviour
 
     private void ProcessTap(Vector2 position)
     {
-        // Check for double/triple tap
         float timeSinceLastTap = Time.time - lastTapTime;
 
         if (timeSinceLastTap <= doubleTapMaxDelay)
@@ -234,19 +237,16 @@ public class AccessibilityManager : MonoBehaviour
 
             if (consecutiveTaps == 1)
             {
-                // Double tap
                 OnDoubleTap(position);
             }
             else if (consecutiveTaps == 2)
             {
-                // Triple tap
                 OnTripleTap(position);
-                consecutiveTaps = 0; // Reset after triple tap
+                consecutiveTaps = 0;
             }
         }
         else
         {
-            // Single tap
             consecutiveTaps = 0;
             OnSingleTap(position);
         }
@@ -258,43 +258,51 @@ public class AccessibilityManager : MonoBehaviour
     {
         PlaySound(tapSound);
 
-        // Toggle accessibility menu
-        ToggleAccessibilityMenu();
+        // NEW: Long press now activates voice listening if available
+        if (enableVoiceCommands && voiceRecognitionHelper != null && !isEmergencyMode)
+        {
+            if (!voiceRecognitionHelper.IsListening())
+            {
+                voiceRecognitionHelper.StartListening();
+                SpeakMessage("Listening for voice command");
+            }
+            else
+            {
+                voiceRecognitionHelper.StopListening();
+                SpeakMessage("Voice listening stopped");
+            }
+        }
+        else
+        {
+            ToggleAccessibilityMenu();
+        }
     }
 
     private void ProcessSwipe(Vector2 direction)
     {
         PlaySound(swipeSound);
 
-        // Normalize direction
         direction.Normalize();
 
-        // Determine swipe direction (simplified to 4 directions)
         if (Mathf.Abs(direction.x) > Mathf.Abs(direction.y))
         {
-            // Horizontal swipe
             if (direction.x > 0)
             {
-                // Right swipe
                 OnSwipeRight();
             }
             else
             {
-                // Left swipe
                 OnSwipeLeft();
             }
         }
         else
         {
-            // Vertical swipe
             if (direction.y > 0)
             {
-                // Up swipe
                 OnSwipeUp();
             }
             else
             {
-                // Down swipe
                 OnSwipeDown();
             }
         }
@@ -305,21 +313,19 @@ public class AccessibilityManager : MonoBehaviour
     {
         PlaySound(tapSound);
 
-        // Request next navigation instruction or environmental info
         if (navigationManager != null && navigationManager.isNavigating)
         {
             navigationManager.ProvideNextInstruction();
         }
         else
         {
-            // If not navigating, announce what's ahead using NavigationEnhancer if available
             if (navigationEnhancer != null)
             {
                 navigationEnhancer.AnnounceWhatsAhead();
             }
             else
             {
-                AnnounceWhatsAhead(); // Fallback to original implementation
+                AnnounceWhatsAhead();
             }
         }
     }
@@ -328,7 +334,6 @@ public class AccessibilityManager : MonoBehaviour
     {
         PlaySound(tapSound, 2);
 
-        // Start/stop navigation
         if (navigationManager != null)
         {
             if (navigationManager.isNavigating)
@@ -352,24 +357,37 @@ public class AccessibilityManager : MonoBehaviour
     {
         PlaySound(tapSound, 3);
 
-        // Announce current location and status
-        AnnounceCurrentStatus();
+        // NEW: Triple tap now provides enhanced status if available
+        if (enhanced3DMapManager != null && enhanced3DMapManager.GetCurrentMap() != null)
+        {
+            var currentMap = enhanced3DMapManager.GetCurrentMap();
+            string status = $"Enhanced map loaded: {currentMap.name}. ";
+            status += $"Path has {currentMap.waypoints.Count} waypoints over {currentMap.totalPathLength:F1} meters. ";
+            
+            if (enhanced3DMapManager.IsNavigating())
+            {
+                status += $"Currently navigating. At waypoint {enhanced3DMapManager.GetCurrentWaypointIndex() + 1}.";
+            }
+            
+            SpeakMessage(status);
+        }
+        else
+        {
+            AnnounceCurrentStatus();
+        }
     }
 
     private void OnSwipeRight()
     {
         if (accessibilityMenuOpen)
         {
-            // In menu: increase value
             IncreaseValue();
         }
         else
         {
-            // Not in menu: next path/waypoint
             if (navigationManager != null && !navigationManager.isNavigating)
             {
                 SpeakMessage("Skipping to next waypoint");
-                // Logic to skip to next waypoint would go here
             }
         }
     }
@@ -378,16 +396,13 @@ public class AccessibilityManager : MonoBehaviour
     {
         if (accessibilityMenuOpen)
         {
-            // In menu: decrease value
             DecreaseValue();
         }
         else
         {
-            // Not in menu: previous path/waypoint
             if (navigationManager != null && !navigationManager.isNavigating)
             {
                 SpeakMessage("Going back to previous waypoint");
-                // Logic to go back to previous waypoint would go here
             }
         }
     }
@@ -396,12 +411,10 @@ public class AccessibilityManager : MonoBehaviour
     {
         if (accessibilityMenuOpen)
         {
-            // In menu: previous option
             SelectPreviousOption();
         }
         else
         {
-            // Load path
             SpeakMessage("Loading saved paths");
             if (hitPointManager != null)
             {
@@ -414,21 +427,28 @@ public class AccessibilityManager : MonoBehaviour
     {
         if (accessibilityMenuOpen)
         {
-            // In menu: next option
             SelectNextOption();
         }
         else
         {
-            // Save current path
-            SpeakMessage("Saving current path");
-            if (hitPointManager != null && hitPointManager.poseClassList.Count > 0)
+            // NEW: Enhanced path saving
+            if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
             {
-                hitPointManager.SaveAllTheInformationToFile();
+                SpeakMessage("Cannot save during active navigation");
+                PlaySound(errorSound);
             }
             else
             {
-                SpeakMessage("No path to save");
-                PlaySound(errorSound);
+                SpeakMessage("Saving current path");
+                if (hitPointManager != null && hitPointManager.poseClassList.Count > 0)
+                {
+                    hitPointManager.SaveAllTheInformationToFile();
+                }
+                else
+                {
+                    SpeakMessage("No path to save");
+                    PlaySound(errorSound);
+                }
             }
         }
     }
@@ -464,7 +484,6 @@ public class AccessibilityManager : MonoBehaviour
         SpeakMessage(menuOptions[selectedMenuOption]);
         PlaySound(tapSound);
         
-        // Update UI to show selected option
         UpdateAccessibilityStatusText();
     }
 
@@ -477,7 +496,6 @@ public class AccessibilityManager : MonoBehaviour
         SpeakMessage(menuOptions[selectedMenuOption]);
         PlaySound(tapSound);
         
-        // Update UI to show selected option
         UpdateAccessibilityStatusText();
     }
 
@@ -486,7 +504,6 @@ public class AccessibilityManager : MonoBehaviour
         if (!accessibilityMenuOpen)
             return;
 
-        // Handle based on selected option
         switch (selectedMenuOption)
         {
             case 0: // Speech rate
@@ -504,10 +521,13 @@ public class AccessibilityManager : MonoBehaviour
             case 4: // Verbose mode
                 ToggleVerboseMode();
                 break;
-            case 5: // Help
-                ProvideHelp();
+            case 5: // Voice command settings
+                ToggleVoiceCommandSettings();
                 break;
-            case 6: // Exit menu
+            case 6: // Help
+                ProvideEnhancedHelp();
+                break;
+            case 7: // Exit menu
                 ToggleAccessibilityMenu();
                 break;
         }
@@ -518,7 +538,6 @@ public class AccessibilityManager : MonoBehaviour
         if (!accessibilityMenuOpen)
             return;
 
-        // Handle based on selected option
         switch (selectedMenuOption)
         {
             case 0: // Speech rate
@@ -536,10 +555,13 @@ public class AccessibilityManager : MonoBehaviour
             case 4: // Verbose mode
                 ToggleVerboseMode();
                 break;
-            case 5: // Help
-                ProvideHelp();
+            case 5: // Voice command settings
+                ToggleVoiceCommandSettings();
                 break;
-            case 6: // Exit menu
+            case 6: // Help
+                ProvideEnhancedHelp();
+                break;
+            case 7: // Exit menu
                 ToggleAccessibilityMenu();
                 break;
         }
@@ -657,20 +679,55 @@ public class AccessibilityManager : MonoBehaviour
         PlaySound(tapSound);
         UpdateAccessibilityStatusText();
     }
-    
-    public void ProvideHelp()
+
+    // NEW: Voice command settings toggle
+    public void ToggleVoiceCommandSettings()
     {
-        string helpText = "AR Navigation Assistant Help. Use the following gestures: ";
-        helpText += "Single tap to get current direction. ";
-        helpText += "Double tap to start or stop navigation. ";
-        helpText += "Triple tap for current status. ";
-        helpText += "Long press to open accessibility menu. ";
-        helpText += "Swipe up to load paths. ";
-        helpText += "Swipe down to save current path. ";
+        if (voiceRecognitionHelper != null)
+        {
+            enableAutoListening = !enableAutoListening;
+            
+            if (enableAutoListening)
+            {
+                voiceRecognitionHelper.StartAutoListening();
+                SpeakMessage("Auto voice listening enabled. I will listen for commands automatically.");
+            }
+            else
+            {
+                voiceRecognitionHelper.StopAutoListening();
+                SpeakMessage("Auto voice listening disabled. Use long press to activate voice commands.");
+            }
+        }
+        else
+        {
+            SpeakMessage("Voice recognition not available");
+        }
+        
+        PlaySound(tapSound);
+        UpdateAccessibilityStatusText();
+    }
+    
+    // NEW: Enhanced help with voice commands
+    public void ProvideEnhancedHelp()
+    {
+        string helpText = "AR Navigation Assistant Help. ";
+        helpText += "Gestures: Single tap for directions, double tap to start or stop navigation, triple tap for status, long press for voice commands. ";
+        helpText += "Swipe up to load paths, down to save paths. ";
         
         if (enableVoiceCommands && voiceRecognitionHelper != null)
         {
-            helpText += "Voice commands are enabled. You can say 'Start Navigation', 'Stop Navigation', 'Where am I', or 'Help' at any time.";
+            helpText += "Voice commands available: Say 'Start navigation', 'Stop navigation', 'Record path', 'Save path', 'Load path', ";
+            helpText += "'Where am I', 'What's ahead', 'Help', 'Repeat', or 'Emergency' for assistance. ";
+            helpText += "You can also use natural phrases like 'begin navigation' or 'tell me what's in front of me'. ";
+            
+            if (enableAutoListening)
+            {
+                helpText += "Auto listening is enabled, so I'm always ready for voice commands.";
+            }
+            else
+            {
+                helpText += "Use long press to activate voice listening.";
+            }
         }
         
         SpeakMessage(helpText);
@@ -690,23 +747,19 @@ public class AccessibilityManager : MonoBehaviour
     {
         if (highContrastMode)
         {
-            // Apply high contrast theme
             foreach (Image image in allImageElements)
             {
                 if (image != null)
                 {
-                    // Increase contrast by making dark colors darker and light colors lighter
                     Color color = image.color;
                     float luminance = color.r * 0.299f + color.g * 0.587f + color.b * 0.114f;
 
                     if (luminance > 0.5f)
                     {
-                        // Make light colors lighter
                         color = Color.Lerp(color, Color.white, 0.3f);
                     }
                     else
                     {
-                        // Make dark colors darker
                         color = Color.Lerp(color, Color.black, 0.3f);
                     }
 
@@ -714,7 +767,6 @@ public class AccessibilityManager : MonoBehaviour
                 }
             }
 
-            // Make text more contrasty
             foreach (TextMeshProUGUI text in allTextElements)
             {
                 if (text != null)
@@ -731,7 +783,6 @@ public class AccessibilityManager : MonoBehaviour
                         text.color = Color.black;
                     }
 
-                    // Increase outline for better readability
                     text.outlineWidth = 0.2f;
                     text.outlineColor = luminance > 0.5f ? Color.black : Color.white;
                 }
@@ -739,9 +790,6 @@ public class AccessibilityManager : MonoBehaviour
         }
         else
         {
-            // Reset to normal contrast
-            // Would need to store original colors to properly implement
-            // For now, just remove outlines
             foreach (TextMeshProUGUI text in allTextElements)
             {
                 if (text != null)
@@ -754,11 +802,9 @@ public class AccessibilityManager : MonoBehaviour
 
     private void CacheUIElements()
     {
-        // Find all text elements
         TextMeshProUGUI[] texts = FindObjectsOfType<TextMeshProUGUI>();
         allTextElements.AddRange(texts);
 
-        // Find all image elements
         Image[] images = FindObjectsOfType<Image>();
         allImageElements.AddRange(images);
     }
@@ -808,7 +854,14 @@ public class AccessibilityManager : MonoBehaviour
 
             status += "High Contrast: " + (highContrastMode ? "On" : "Off") + "\n";
             status += "Vibration: " + (vibrationEnabled ? "On" : "Off") + "\n";
-            status += "Verbose Mode: " + (verboseMode ? "On" : "Off");
+            status += "Verbose Mode: " + (verboseMode ? "On" : "Off") + "\n";
+            
+            // NEW: Voice command status
+            if (enableVoiceCommands)
+            {
+                status += "Voice Commands: " + (enableVoiceCommands ? "On" : "Off") + "\n";
+                status += "Auto Listening: " + (enableAutoListening ? "On" : "Off");
+            }
 
             accessibilityStatusText.text = status;
         }
@@ -818,7 +871,6 @@ public class AccessibilityManager : MonoBehaviour
     {
         if (audioSource != null && clip != null)
         {
-            // Play sound the specified number of times
             StartCoroutine(PlaySoundRepeatedly(clip, repetitions));
         }
     }
@@ -846,33 +898,35 @@ public class AccessibilityManager : MonoBehaviour
     {
         string instructions = "Welcome to the AR Navigation Assistant. ";
         instructions += "Single tap to get directions. Double tap to start or stop navigation. ";
-        instructions += "Triple tap for current status. Long press to open accessibility menu. ";
+        instructions += "Triple tap for current status. Long press for voice commands. ";
         instructions += "Swipe up to load paths, down to save paths.";
+
+        // NEW: Add voice command info
+        if (enableVoiceCommands)
+        {
+            instructions += " Voice commands are enabled. Say 'Help' for available commands.";
+        }
 
         SpeakMessage(instructions);
     }
 
     public void AnnounceWhatsAhead()
     {
-        // Use NavigationEnhancer if available
         if (navigationEnhancer != null)
         {
             navigationEnhancer.AnnounceWhatsAhead();
             return;
         }
         
-        // Original implementation if NavigationEnhancer not available
         if (hitPointManager == null || Camera.main == null)
             return;
 
-        // Cast a ray forward to detect obstacles
         Vector3 rayStart = Camera.main.transform.position;
         Vector3 rayDirection = Camera.main.transform.forward;
 
         string message = "";
         bool foundSomething = false;
 
-        // Check for obstacles in front
         RaycastHit hit;
         if (Physics.Raycast(rayStart, rayDirection, out hit, 10f))
         {
@@ -894,7 +948,6 @@ public class AccessibilityManager : MonoBehaviour
             foundSomething = true;
         }
 
-        // Check for nearby obstacles in any direction
         float nearestObstacleDistance = float.MaxValue;
         Vector3 nearestObstacleDirection = Vector3.zero;
 
@@ -903,7 +956,7 @@ public class AccessibilityManager : MonoBehaviour
             if (pose.waypointType == WaypointType.Obstacle)
             {
                 float distance = Vector3.Distance(rayStart, pose.position);
-                if (distance < 3.0f && distance < nearestObstacleDistance) // Within 3 meters
+                if (distance < 3.0f && distance < nearestObstacleDistance)
                 {
                     nearestObstacleDistance = distance;
                     nearestObstacleDirection = pose.position - rayStart;
@@ -918,7 +971,6 @@ public class AccessibilityManager : MonoBehaviour
             else
                 message = "Caution, ";
 
-            // Determine direction to nearest obstacle
             nearestObstacleDirection.y = 0;
             nearestObstacleDirection.Normalize();
 
@@ -933,10 +985,8 @@ public class AccessibilityManager : MonoBehaviour
             foundSomething = true;
         }
 
-        // Also check for path information
         if (hitPointManager.poseClassList.Count > 0)
         {
-            // Find nearest path point
             PoseClass nearestPath = null;
             float nearestPathDistance = float.MaxValue;
             
@@ -960,14 +1010,12 @@ public class AccessibilityManager : MonoBehaviour
                 if (foundSomething)
                     message += " ";
                 
-                // Determine type of point
                 string pointType = "path point";
                 if (nearestPath.waypointType == WaypointType.StartPoint)
                     pointType = "start point";
                 else if (nearestPath.waypointType == WaypointType.EndPoint)
                     pointType = "destination";
                 
-                // Determine direction
                 Vector3 pathDirection = nearestPath.position - rayStart;
                 pathDirection.y = 0;
                 pathDirection.Normalize();
@@ -992,14 +1040,12 @@ public class AccessibilityManager : MonoBehaviour
 
     public void AnnounceCurrentStatus()
     {
-        // Use NavigationEnhancer if available
         if (navigationEnhancer != null)
         {
             navigationEnhancer.DescribePathQuality();
             return;
         }
         
-        // Original implementation if NavigationEnhancer not available
         string status = "Current status: ";
 
         if (navigationManager != null && navigationManager.isNavigating)
@@ -1088,44 +1134,20 @@ public class AccessibilityManager : MonoBehaviour
         }
     }
     
-    // Voice command handling
+    // NEW: Enhanced voice command handling
     public void HandleVoiceCommand(string command)
     {
-        // Convert command to lowercase for easier comparison
         command = command.ToLower();
         
-        // Play acknowledgment sound
         PlaySound(confirmSound);
 
-        // Process command - use NavigationEnhancer for enhanced handling if available
-        if (navigationEnhancer != null)
+        if (command.Contains("start") && (command.Contains("navigation") || command.Contains("navigate")))
         {
-            // Pass voice command to NavigationEnhancer for enhanced processing
-            // This would ideally call a method like navigationEnhancer.HandleVoiceCommand(command)
-            // but we'll handle common commands here
-
-            if (command.Contains("save") && command.Contains("map"))
+            if (enhanced3DMapManager != null && enhanced3DMapManager.GetCurrentMap() != null)
             {
-                navigationEnhancer.SaveEnhancedMap();
-                return;
+                enhanced3DMapManager.StartEnhancedNavigation();
             }
-            else if (command.Contains("load") && command.Contains("map"))
-            {
-                SpeakMessage("Please select a map to load");
-                hitPointManager.PromptFilenameToLoad();
-                return;
-            }
-            else if (command.Contains("describe") && command.Contains("environment"))
-            {
-                navigationEnhancer.DescribeSurroundings();
-                return;
-            }
-        }
-
-        // Legacy command handling
-        if (command.Contains("start") && command.Contains("navigation") || command.Contains("navigate"))
-        {
-            if (navigationManager != null && !navigationManager.isNavigating)
+            else if (navigationManager != null && !navigationManager.isNavigating)
             {
                 if (hitPointManager.poseClassList.Count > 0)
                 {
@@ -1143,9 +1165,14 @@ public class AccessibilityManager : MonoBehaviour
                 SpeakMessage("Navigation is already active");
             }
         }
-        else if (command.Contains("stop") && command.Contains("navigation") || command.Contains("end") && command.Contains("navigation"))
+        else if (command.Contains("stop") && (command.Contains("navigation") || command.Contains("end")))
         {
-            if (navigationManager != null && navigationManager.isNavigating)
+            if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
+            {
+                enhanced3DMapManager.StopNavigation();
+                SpeakMessage("Enhanced navigation stopped");
+            }
+            else if (navigationManager != null && navigationManager.isNavigating)
             {
                 navigationManager.StopNavigation();
                 SpeakMessage("Navigation stopped");
@@ -1155,68 +1182,148 @@ public class AccessibilityManager : MonoBehaviour
                 SpeakMessage("Navigation is not active");
             }
         }
-        else if (command.Contains("where") && command.Contains("am") && command.Contains("i") || 
-                 command.Contains("current") && command.Contains("location"))
+        else if (command.Contains("record") && command.Contains("path"))
         {
-            AnnounceCurrentStatus();
-        }
-        else if (command.Contains("what") && command.Contains("ahead") || 
-                 command.Contains("describe") && command.Contains("surroundings"))
-        {
-            AnnounceWhatsAhead();
-        }
-        else if (command.Contains("help") || command.Contains("instructions"))
-        {
-            ProvideHelp();
-        }
-        else if (command.Contains("open") && command.Contains("menu") || 
-                 command.Contains("accessibility") && command.Contains("menu"))
-        {
-            if (!accessibilityMenuOpen)
+            if (enhanced3DMapManager != null)
             {
-                ToggleAccessibilityMenu();
+                enhanced3DMapManager.StartPathRecording();
+                SpeakMessage("Starting enhanced path recording. Walk slowly along your desired route.");
+            }
+            else if (hitPointManager != null)
+            {
+                hitPointManager.StartEnhancedPathCreation();
             }
             else
             {
-                SpeakMessage("Menu is already open");
-            }
-        }
-        else if (command.Contains("close") && command.Contains("menu"))
-        {
-            if (accessibilityMenuOpen)
-            {
-                ToggleAccessibilityMenu();
-            }
-            else
-            {
-                SpeakMessage("Menu is already closed");
-            }
-        }
-        else if (command.Contains("load") && command.Contains("path"))
-        {
-            SpeakMessage("Loading saved paths");
-            if (hitPointManager != null)
-            {
-                hitPointManager.PromptFilenameToLoad();
+                SpeakMessage("Enhanced path recording not available");
             }
         }
         else if (command.Contains("save") && command.Contains("path"))
         {
-            SpeakMessage("Saving current path");
-            if (hitPointManager != null && hitPointManager.poseClassList.Count > 0)
+            if (enhanced3DMapManager != null)
             {
-                hitPointManager.SaveAllTheInformationToFile();
+                enhanced3DMapManager.CompletePathRecording();
             }
             else
             {
-                SpeakMessage("No path to save");
-                PlaySound(errorSound);
+                SpeakMessage("Saving current path");
+                if (hitPointManager != null && hitPointManager.poseClassList.Count > 0)
+                {
+                    hitPointManager.SaveAllTheInformationToFile();
+                }
+                else
+                {
+                    SpeakMessage("No path to save");
+                    PlaySound(errorSound);
+                }
             }
+        }
+        else if (command.Contains("load") && command.Contains("path"))
+        {
+            if (enhanced3DMapManager != null)
+            {
+                var availableMaps = enhanced3DMapManager.GetAvailableMaps();
+                if (availableMaps.Count > 0)
+                {
+                    string mapToLoad = availableMaps[availableMaps.Count - 1];
+                    enhanced3DMapManager.LoadEnhanced3DMap(mapToLoad);
+                    SpeakMessage($"Loading enhanced map: {mapToLoad}");
+                }
+                else
+                {
+                    SpeakMessage("No enhanced maps available");
+                }
+            }
+            else
+            {
+                SpeakMessage("Loading saved paths");
+                if (hitPointManager != null)
+                {
+                    hitPointManager.PromptFilenameToLoad();
+                }
+            }
+        }
+        else if (command.Contains("where") && command.Contains("am") && command.Contains("i"))
+        {
+            AnnounceCurrentStatus();
+        }
+        else if (command.Contains("what") && command.Contains("ahead"))
+        {
+            AnnounceWhatsAhead();
+        }
+        else if (command.Contains("repeat"))
+        {
+            if (navigationManager != null)
+            {
+                navigationManager.ProvideNextInstruction();
+            }
+        }
+        else if (command.Contains("help"))
+        {
+            ProvideEnhancedHelp();
+        }
+        else if (command.Contains("emergency"))
+        {
+            HandleEmergencyCommand();
         }
         else
         {
-            // Unknown command
-            SpeakMessage("Command not recognized. Please try again.");
+            SpeakMessage("Command not recognized. Say 'help' for available commands.");
+        }
+    }
+
+    // NEW: Emergency assistance system
+    private void HandleEmergencyCommand()
+    {
+        isEmergencyMode = true;
+        
+        SpeakMessage("Emergency mode activated. I will help you get to safety.");
+        
+        if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
+        {
+            enhanced3DMapManager.StopNavigation();
+        }
+        else if (navigationManager != null && navigationManager.isNavigating)
+        {
+            navigationManager.StopNavigation();
+        }
+        
+        AnnounceCurrentStatus();
+        
+        if (emergencyAssistanceCoroutine != null)
+        {
+            StopCoroutine(emergencyAssistanceCoroutine);
+        }
+        emergencyAssistanceCoroutine = StartCoroutine(EmergencyAssistanceSequence());
+    }
+
+    private System.Collections.IEnumerator EmergencyAssistanceSequence()
+    {
+        yield return new WaitForSeconds(3.0f);
+        
+        SpeakMessage("Stay calm. I'm going to help you navigate to safety. First, let me scan the area around you.");
+        
+        yield return new WaitForSeconds(2.0f);
+        
+        AnnounceWhatsAhead();
+        
+        yield return new WaitForSeconds(5.0f);
+        
+        SpeakMessage("If you need immediate assistance, consider calling emergency services. Otherwise, I can help guide you to a safe location. Say 'help me navigate' to continue with guided assistance.");
+        
+        // Enable emergency voice listening mode
+        if (voiceRecognitionHelper != null)
+        {
+            voiceRecognitionHelper.StartAutoListening();
+        }
+        
+        yield return new WaitForSeconds(30.0f);
+        
+        // After 30 seconds, exit emergency mode if no further commands
+        if (isEmergencyMode)
+        {
+            isEmergencyMode = false;
+            SpeakMessage("Emergency mode deactivated. You can reactivate it anytime by saying 'Emergency'.");
         }
     }
 }

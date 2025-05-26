@@ -22,6 +22,9 @@ public class HitPointManager : MonoBehaviour
     
     // Reference to NavigationEnhancer
     private NavigationEnhancer navigationEnhancer;
+    
+    // NEW: Reference to Enhanced3DMapManager
+    private Enhanced3DMapManager enhanced3DMapManager;
 
     // UI references
     public GameObject textRefs;
@@ -50,18 +53,12 @@ public class HitPointManager : MonoBehaviour
     private Vector3 lastScanPosition;
     private float minDistanceBetweenPoints = 0.5f;
 
-    // UI controls
-    //public Button createPathButton;
-    //public Button manualPathButton;
-    //public Button loadPathButton;
-    //public Button savePathButton;
-    //public Button startNavigationButton;
-    //public Button stopNavigationButton;
-    //public Button scanEnvironmentButton;
+    // NEW: Enhanced path creation settings
+    [SerializeField] private bool useEnhanced3DMode = true;
+    [SerializeField] private bool autoOptimizeWaypoints = true;
 
     // Manager references
     private NavigationManager navigationManager;
-    //private EnvironmentScanManager environmentScanManager;
 
     // Settings
     [SerializeField] private float environmentScanRadius = 10f;
@@ -77,14 +74,12 @@ public class HitPointManager : MonoBehaviour
         width = 0;
         height = 0;
 
-        // Initialize environment map root
         if (environmentMapRoot == null)
         {
             environmentMapRoot = new GameObject("EnvironmentMapRoot");
             environmentMapRoot.transform.SetParent(transform);
         }
 
-        // Create storage directory if it doesn't exist
         if (!Directory.Exists(GetAndroidExternalStoragePath() + "/" + "ARCoreTrackables"))
         {
             savedLocationPanel.SetActive(false);
@@ -92,118 +87,96 @@ public class HitPointManager : MonoBehaviour
         }
         else
         {
-            // Populate saved locations panel
             PopulateSavedLocations();
         }
     }
 
     void Start()
     {
-        // Get AR components
         raycastManager = GetComponent<ARRaycastManager>();
         arPlaneManager = GetComponent<ARPlaneManager>();
         arPointCloudManager = GetComponent<ARPointCloudManager>();
         xrOrigin = GetComponent<XROrigin>();
         raycastHitList = new List<ARRaycastHit>();
 
-        // Initialize camera reference
         if (mainCamera == null)
             mainCamera = Camera.main;
 
-        // Initial UI setup
         if (textRefs != null)
             textRefs.GetComponent<TextMeshProUGUI>().text = "AR Navigation Assistant - Ready\n";
 
-        // Initialize managers
         SetupManagers();
 
-        // Setup button listeners
-        //SetupUIButtons();
+        // NEW: Integration with Enhanced3D system
+        IntegrateWithEnhanced3D();
 
-        // Start in environment scanning mode by default
         SwitchToEnvironmentScanningMode();
     }
 
     private void SetupManagers()
     {
-        // Setup Navigation Manager
         navigationManager = GetComponent<NavigationManager>();
         if (navigationManager == null)
             navigationManager = FindObjectOfType<NavigationManager>();
         
-        // Setup NavigationEnhancer
         navigationEnhancer = GetComponent<NavigationEnhancer>();
         if (navigationEnhancer == null)
             navigationEnhancer = FindObjectOfType<NavigationEnhancer>();
             
-        // Connect NavigationEnhancer to this HitPointManager
         if (navigationEnhancer != null)
             navigationEnhancer.hitPointManager = this;
-
-        // Setup Environment Scan Manager
-        //environmentScanManager = GetComponent<EnvironmentScanManager>();
-        //if (environmentScanManager == null)
-        //    environmentScanManager = gameObject.AddComponent<EnvironmentScanManager>();
-        //environmentScanManager.hitPointManager = this;
     }
 
-    //private void SetupUIButtons()
-    //{
-    //    if (createPathButton != null)
-    //        createPathButton.onClick.AddListener(SwitchToPathCreationMode);
-
-    //    if (manualPathButton != null)
-    //        manualPathButton.onClick.AddListener(SwitchToManualPathCreationMode);
-
-    //    if (loadPathButton != null)
-    //        loadPathButton.onClick.AddListener(PromptFilenameToLoad);
-
-    //    if (savePathButton != null)
-    //        savePathButton.onClick.AddListener(PromptSavePathWithName);
-
-    //    if (startNavigationButton != null)
-    //        startNavigationButton.onClick.AddListener(StartNavigationMode);
-
-    //    if (stopNavigationButton != null)
-    //        stopNavigationButton.onClick.AddListener(StopNavigationMode);
-
-    //    if (scanEnvironmentButton != null)
-    //        scanEnvironmentButton.onClick.AddListener(SwitchToEnvironmentScanningMode);
-    //}
+    // NEW: Integration method for Enhanced3DMapManager
+    public void IntegrateWithEnhanced3D()
+    {
+        enhanced3DMapManager = FindObjectOfType<Enhanced3DMapManager>();
+        if (enhanced3DMapManager != null)
+        {
+            Debug.Log("HitPointManager integrated with Enhanced3DMapManager");
+            // Enhanced 3D mapping will handle waypoint creation and management
+        }
+    }
 
     public void PopulateSavedLocations()
     {
-        // Clear any existing buttons
         foreach (Transform child in savedLocationPrefabHolder.transform)
         {
             Destroy(child.gameObject);
         }
 
-        // Check for JSON files first (enhanced maps)
+        // NEW: Check for enhanced 3D maps first
+        if (enhanced3DMapManager != null)
+        {
+            var enhancedMaps = enhanced3DMapManager.GetAvailableMaps();
+            foreach (string mapName in enhancedMaps)
+            {
+                CreateSavedLocationButton(mapName + ".json", true);
+            }
+        }
+
+        // Check for JSON files (enhanced maps)
         string[] jsonFiles = Directory.GetFiles(GetAndroidExternalStoragePath() + "/ARCoreTrackables", "*.json");
         
-        // If no JSON files, fall back to regular CSV files
         if (jsonFiles.Length == 0)
         {
-            // Add buttons for each saved CSV file
             string[] files = Directory.GetFiles(GetAndroidExternalStoragePath() + "/ARCoreTrackables", "*.csv");
             foreach (string file in files)
             {
-                CreateSavedLocationButton(file);
+                CreateSavedLocationButton(file, false);
             }
             savedLocationPanel.SetActive(true);
         }
         else
         {
-            // Add buttons for JSON files (enhanced maps)
             foreach (string file in jsonFiles)
             {
-                CreateSavedLocationButton(file);
+                CreateSavedLocationButton(file, true);
             }
         }
     }
     
-    private void CreateSavedLocationButton(string file)
+    private void CreateSavedLocationButton(string file, bool isEnhanced)
     {
         GameObject go = Instantiate(savedLocationButtonPrefab);
         go.transform.SetParent(savedLocationPrefabHolder.transform);
@@ -211,11 +184,18 @@ public class HitPointManager : MonoBehaviour
         go.SetActive(true);
 
         string fileName = Path.GetFileName(file);
-        go.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = fileName;
+        string displayName = fileName;
+        
+        // Add indicator for enhanced maps
+        if (isEnhanced && fileName.EndsWith(".json"))
+        {
+            displayName = "📍 " + fileName.Replace(".json", " (Enhanced)");
+        }
+        
+        go.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = displayName;
 
-        // Add click listener
         Button button = go.GetComponent<Button>();
-        string fileNameCopy = fileName; // Create a copy for the closure
+        string fileNameCopy = fileName;
         button.onClick.AddListener(() => LoadPathFromFile(fileNameCopy));
     }
 
@@ -244,18 +224,14 @@ public class HitPointManager : MonoBehaviour
         textRefs.GetComponent<TextMeshProUGUI>().text = "Auto Path Creation Mode\n";
         textRefs.GetComponent<TextMeshProUGUI>().text += poseClassList.Count + " Points Detected\n";
 
-        // Auto generate path points in a grid pattern across the screen
         if (width < Screen.width || height < Screen.height)
         {
-            // Raycast at current screen position
-            //TrackableType.FeaturePoint |
             bool hasDetectedHit = raycastManager.Raycast(new Vector2(width, height), raycastHitList, TrackableType.PlaneWithinPolygon);
 
             if (hasDetectedHit)
             {
                 for (int i = 0; i < raycastHitList.Count; i++)
                 {
-                    // Check if we already have a point at this position
                     Vector3 hitPosition = raycastHitList[i].pose.position;
                     bool pointAlreadyExists = false;
 
@@ -270,23 +246,19 @@ public class HitPointManager : MonoBehaviour
 
                     if (!pointAlreadyExists)
                     {
-                        // If we don't have a point here, create one for the path
                         AddNewWaypoint(raycastHitList[i].pose.position, raycastHitList[i].pose.rotation, WaypointType.PathPoint);
                         textRefs.GetComponent<TextMeshProUGUI>().text += "Path point added at " + hitPosition + "\n";
                     }
                 }
 
-                // Move to next grid position
                 width += (Screen.width / 16);
                 height += (Screen.height / 16);
             }
         }
         else if (width >= Screen.width && height >= Screen.height && allowSavingToCSV)
         {
-            // Completed scanning the screen grid
             arPlaneManager.enabled = false;
 
-            // Mark first and last points as start and end
             if (poseClassList.Count >= 2)
             {
                 poseClassList[0].waypointType = WaypointType.StartPoint;
@@ -307,23 +279,19 @@ public class HitPointManager : MonoBehaviour
         textRefs.GetComponent<TextMeshProUGUI>().text += "Tap to place path points\n";
         textRefs.GetComponent<TextMeshProUGUI>().text += "Current points: " + poseClassList.Count + "\n";
 
-        // Handle tap input to place points manually
         if (Input.touchCount > 0 && Input.GetTouch(0).phase == TouchPhase.Began)
         {
             Touch touch = Input.GetTouch(0);
 
-            // Check if touch is on UI
             bool touchedUI = UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject(touch.fingerId);
 
             if (!touchedUI)
             {
-                // Raycast from touch position
                 Ray ray = mainCamera.ScreenPointToRay(touch.position);
                 if (raycastManager.Raycast(ray, raycastHitList, TrackableType.FeaturePoint | TrackableType.PlaneWithinPolygon))
                 {
-                    ARRaycastHit hit = raycastHitList[0]; // Use closest hit
+                    ARRaycastHit hit = raycastHitList[0];
 
-                    // Check if we're near an existing point - if so, determine if we should mark it as obstacle or path
                     bool pointNearby = false;
                     int nearbyPointIndex = -1;
 
@@ -339,24 +307,19 @@ public class HitPointManager : MonoBehaviour
 
                     if (pointNearby)
                     {
-                        // Cycle through waypoint types for the nearby point
                         CycleWaypointType(nearbyPointIndex);
                     }
                     else
                     {
-                        // Add new waypoint
                         AddNewWaypoint(hit.pose.position, hit.pose.rotation, WaypointType.PathPoint);
 
-                        // If this is the first point, mark it as start
                         if (poseClassList.Count == 1)
                         {
                             poseClassList[0].waypointType = WaypointType.StartPoint;
                             UpdateWaypointVisual(0);
                         }
-                        // If we have more than one point, mark the previous as path and this one as end
                         else
                         {
-                            // If there was a previous end point, change it to path
                             for (int i = 0; i < poseClassList.Count - 1; i++)
                             {
                                 if (poseClassList[i].waypointType == WaypointType.EndPoint)
@@ -366,7 +329,6 @@ public class HitPointManager : MonoBehaviour
                                 }
                             }
 
-                            // Mark the new point as end
                             poseClassList[poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
                             UpdateWaypointVisual(poseClassList.Count - 1);
                         }
@@ -382,15 +344,12 @@ public class HitPointManager : MonoBehaviour
         textRefs.GetComponent<TextMeshProUGUI>().text += "Detected planes: " + detectedPlanes.Count + "\n";
         textRefs.GetComponent<TextMeshProUGUI>().text += "Detected obstacles: " + GetObstacleCount() + "\n";
 
-        // Perform environment scanning at intervals
         if (Time.time - lastScanTime > scanningInterval)
         {
             lastScanTime = Time.time;
 
-            // Scan for new planes
             UpdateDetectedPlanes();
 
-            // Detect potential obstacles
             if (Vector3.Distance(mainCamera.transform.position, lastScanPosition) > minDistanceBetweenPoints)
             {
                 DetectObstaclesAround(mainCamera.transform.position);
@@ -415,7 +374,6 @@ public class HitPointManager : MonoBehaviour
         height = 0;
         allowSavingToCSV = true;
 
-        // Enable AR planes for detecting surfaces
         arPlaneManager.enabled = true;
         foreach (var plane in arPlaneManager.trackables)
             plane.gameObject.SetActive(true);
@@ -425,7 +383,6 @@ public class HitPointManager : MonoBehaviour
 
         textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path automatically. Please move slowly.\n";
 
-        // If NavigationEnhancer is available, start a new map
         if (navigationEnhancer != null)
         {
             navigationEnhancer.StartNewMap();
@@ -441,7 +398,6 @@ public class HitPointManager : MonoBehaviour
         isManualPathCreationMode = true;
         isScanningMode = false;
 
-        // Enable AR planes for detecting surfaces
         arPlaneManager.enabled = true;
         foreach (var plane in arPlaneManager.trackables)
             plane.gameObject.SetActive(true);
@@ -451,10 +407,39 @@ public class HitPointManager : MonoBehaviour
 
         textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path manually. Tap to place points.\n";
 
-        // If NavigationEnhancer is available, start a new map
         if (navigationEnhancer != null)
         {
             navigationEnhancer.StartNewMap();
+        }
+    }
+
+    // NEW: Enhanced path creation method
+    public void StartEnhancedPathCreation()
+    {
+        if (enhanced3DMapManager != null)
+        {
+            string pathName = "Path_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            enhanced3DMapManager.StartPathRecording(pathName);
+            
+            if (navigationManager.textToSpeech != null)
+            {
+                navigationManager.textToSpeech.Speak("Enhanced path recording started. This will create optimal waypoints as you walk.");
+            }
+            
+            // Switch to enhanced mode
+            StopAllCoroutines();
+            ClearCurrentWaypoints();
+            poseClassList.Clear();
+            isPathCreationMode = false;
+            isManualPathCreationMode = false;
+            isScanningMode = false;
+            
+            textRefs.GetComponent<TextMeshProUGUI>().text = "Enhanced 3D Path Recording Active\nWalk slowly along your desired route.\n";
+        }
+        else
+        {
+            // Fall back to manual path creation
+            SwitchToManualPathCreationMode();
         }
     }
 
@@ -466,13 +451,11 @@ public class HitPointManager : MonoBehaviour
         isScanningMode = true;
         lastScanTime = 0;
         
-        // Add null check for mainCamera
         if (mainCamera != null)
             lastScanPosition = mainCamera.transform.position;
         else
             Debug.LogWarning("mainCamera is null in SwitchToEnvironmentScanningMode");
 
-        // Add null check for arPlaneManager
         if (arPlaneManager != null)
         {
             arPlaneManager.enabled = true;
@@ -482,20 +465,17 @@ public class HitPointManager : MonoBehaviour
         else
             Debug.LogWarning("arPlaneManager is null in SwitchToEnvironmentScanningMode");
 
-        // Enable point cloud for better environment mapping
         if (arPointCloudManager != null)
             arPointCloudManager.enabled = true;
 
         if (navigationManager != null && navigationManager.textToSpeech != null)
             navigationManager.textToSpeech.Speak("Environment scanning mode activated. Please move around to map your surroundings.");
 
-        // Add null check for textRefs
         if (textRefs != null)
             textRefs.GetComponent<TextMeshProUGUI>().text = "Scanning environment. Move around to map more area.\n";
         else
             Debug.LogWarning("textRefs is null in SwitchToEnvironmentScanningMode");
 
-        // If NavigationEnhancer is available, use it for enhanced scanning
         if (navigationEnhancer != null)
         {
             navigationEnhancer.StartNewMap();
@@ -511,11 +491,9 @@ public class HitPointManager : MonoBehaviour
 
         if (poseClassList.Count > 0)
         {
-            // Disable plane visualization during navigation
             foreach (var plane in arPlaneManager.trackables)
                 plane.gameObject.SetActive(false);
 
-            // Start navigation
             navigationManager.StartNavigation();
         }
         else if (navigationManager.textToSpeech != null)
@@ -538,10 +516,8 @@ public class HitPointManager : MonoBehaviour
 
     public void AddNewWaypoint(Vector3 position, Quaternion rotation, WaypointType type)
     {
-        // Create a unique ID for the waypoint
         string waypointId = Guid.NewGuid().ToString();
 
-        // Add to the pose list
         poseClassList.Add(new PoseClass
         {
             trackingId = waypointId,
@@ -551,7 +527,6 @@ public class HitPointManager : MonoBehaviour
             waypointType = type
         });
 
-        // Create visual representation
         CreateWaypointVisual(poseClassList.Count - 1);
     }
 
@@ -563,11 +538,9 @@ public class HitPointManager : MonoBehaviour
         PoseClass pose = poseClassList[poseIndex];
         GameObject waypointObject = null;
 
-        // Skip creating visuals for obstacle waypoints
         if (pose.waypointType == WaypointType.Obstacle)
-            return;  // This will keep the obstacle in the list but not show it visually
+            return;
 
-        // Create appropriate visual based on waypoint type
         switch (pose.waypointType)
         {
             case WaypointType.StartPoint:
@@ -590,10 +563,8 @@ public class HitPointManager : MonoBehaviour
             waypointObject.name = "Waypoint_" + poseIndex + "_" + pose.waypointType.ToString();
             waypointObject.tag = "Waypoint";
 
-            // Store reference to created waypoint
             instantiatedWaypoints.Add(waypointObject);
 
-            // Add waypoint index as component for easy reference
             WaypointIdentifier identifier = waypointObject.AddComponent<WaypointIdentifier>();
             identifier.waypointIndex = poseIndex;
         }
@@ -604,7 +575,6 @@ public class HitPointManager : MonoBehaviour
         if (poseIndex < 0 || poseIndex >= poseClassList.Count)
             return;
 
-        // Find and destroy the old visual
         for (int i = 0; i < instantiatedWaypoints.Count; i++)
         {
             WaypointIdentifier identifier = instantiatedWaypoints[i].GetComponent<WaypointIdentifier>();
@@ -616,7 +586,6 @@ public class HitPointManager : MonoBehaviour
             }
         }
 
-        // Create new visual with updated type
         CreateWaypointVisual(poseIndex);
     }
 
@@ -625,7 +594,6 @@ public class HitPointManager : MonoBehaviour
         if (poseIndex < 0 || poseIndex >= poseClassList.Count)
             return;
 
-        // Cycle through waypoint types
         switch (poseClassList[poseIndex].waypointType)
         {
             case WaypointType.PathPoint:
@@ -642,10 +610,8 @@ public class HitPointManager : MonoBehaviour
                 break;
         }
 
-        // Update the visual representation
         UpdateWaypointVisual(poseIndex);
 
-        // Speak the new type
         if (navigationManager.textToSpeech != null)
         {
             navigationManager.textToSpeech.Speak("Point changed to " + poseClassList[poseIndex].waypointType.ToString());
@@ -654,7 +620,6 @@ public class HitPointManager : MonoBehaviour
 
     public void ClearCurrentWaypoints()
     {
-        // Destroy all waypoint objects
         foreach (GameObject waypoint in instantiatedWaypoints)
         {
             Destroy(waypoint);
@@ -683,37 +648,28 @@ public class HitPointManager : MonoBehaviour
         {
             string planeId = plane.trackableId.ToString();
 
-            // If we haven't stored this plane yet
             if (!detectedPlanes.ContainsKey(planeId))
             {
-                // Create a visual representation for the plane
                 GameObject planeVisual = new GameObject("Plane_" + planeId);
                 planeVisual.transform.SetParent(environmentMapRoot.transform);
 
-                // Add a mesh renderer and material to visualize the plane
                 MeshFilter meshFilter = planeVisual.AddComponent<MeshFilter>();
                 MeshRenderer meshRenderer = planeVisual.AddComponent<MeshRenderer>();
 
-                // Copy the mesh from the AR plane
                 meshFilter.mesh = plane.GetComponent<MeshFilter>().mesh;
 
-                // Set position and rotation
                 planeVisual.transform.position = plane.transform.position;
                 planeVisual.transform.rotation = plane.transform.rotation;
                 planeVisual.transform.localScale = plane.transform.localScale;
 
-                // Create a semi-transparent material
                 Material planeMaterial = new Material(Shader.Find("Standard"));
-                planeMaterial.color = new Color(0.2f, 0.8f, 0.3f, 0.3f); // Green, semi-transparent
+                planeMaterial.color = new Color(0.2f, 0.8f, 0.3f, 0.3f);
                 meshRenderer.material = planeMaterial;
 
-                // Make the plane not visible by default (we'll use this for navigation data)
                 planeVisual.SetActive(false);
 
-                // Store reference to the plane
                 detectedPlanes.Add(planeId, planeVisual);
 
-                // Add floor surface waypoints if this is a horizontal plane
                 if (plane.alignment == PlaneAlignment.HorizontalUp)
                 {
                     AddWaypointsToPlane(plane);
@@ -724,26 +680,21 @@ public class HitPointManager : MonoBehaviour
 
     private void AddWaypointsToPlane(ARPlane plane)
     {
-        // Get the plane's boundary points
         Vector2[] boundaryPoints2D = plane.boundary.ToArray();
 
         if (boundaryPoints2D.Length < 3)
             return;
 
-        // Get the plane center and normal
         Vector3 planeCenter = plane.center;
         Vector3 planeNormal = plane.normal;
 
-        // Create grid of waypoints on the plane
-        float gridSize = 0.5f; // Adjust based on density needed
+        float gridSize = 0.5f;
 
-        // Calculate plane dimensions
         float minX = float.MaxValue, maxX = float.MinValue;
         float minZ = float.MaxValue, maxZ = float.MinValue;
 
         foreach (Vector2 point2D in boundaryPoints2D)
         {
-            // Convert 2D point to 3D in plane's local space (y is up in local space)
             Vector3 localPoint = new Vector3(point2D.x, 0, point2D.y);
             Vector3 worldPoint = plane.transform.TransformPoint(localPoint);
 
@@ -753,17 +704,14 @@ public class HitPointManager : MonoBehaviour
             if (worldPoint.z > maxZ) maxZ = worldPoint.z;
         }
 
-        // Create grid of waypoints
         for (float x = minX; x <= maxX; x += gridSize)
         {
             for (float z = minZ; z <= maxZ; z += gridSize)
             {
                 Vector3 potentialPoint = new Vector3(x, planeCenter.y, z);
 
-                // Check if point is inside plane boundary
                 if (IsPointInPolygon(potentialPoint, plane))
                 {
-                    // Check if we already have a point nearby
                     bool pointExists = false;
                     foreach (var pose in poseClassList)
                     {
@@ -776,7 +724,6 @@ public class HitPointManager : MonoBehaviour
 
                     if (!pointExists)
                     {
-                        // Add as a potential path point
                         AddNewWaypoint(potentialPoint, Quaternion.LookRotation(Vector3.forward, planeNormal), WaypointType.PathPoint);
                     }
                 }
@@ -786,13 +733,10 @@ public class HitPointManager : MonoBehaviour
 
     private bool IsPointInPolygon(Vector3 point, ARPlane plane)
     {
-        // Convert world point to plane's local space
         Vector3 localPoint = plane.transform.InverseTransformPoint(point);
 
-        // Convert to 2D point (in ARPlane's boundary coordinate system)
         Vector2 point2D = new Vector2(localPoint.x, localPoint.z);
 
-        // Get boundary points in local space
         Vector2[] boundaryPoints = plane.boundary.ToArray();
 
         int j = boundaryPoints.Length - 1;
@@ -817,9 +761,8 @@ public class HitPointManager : MonoBehaviour
 
     private void DetectObstaclesAround(Vector3 position)
     {
-        // Cast rays in multiple directions to detect obstacles
-        int rayCount = 8; // Number of rays to cast around
-        float rayLength = 3.0f; // How far to cast rays
+        int rayCount = 8;
+        float rayLength = 3.0f;
 
         for (int i = 0; i < rayCount; i++)
         {
@@ -829,10 +772,8 @@ public class HitPointManager : MonoBehaviour
             RaycastHit hit;
             if (Physics.Raycast(position, direction, out hit, rayLength))
             {
-                // If hit something that's not a waypoint, mark as obstacle
                 if (hit.collider != null && !hit.collider.CompareTag("Waypoint"))
                 {
-                    // Check if we already have an obstacle nearby
                     bool obstacleExists = false;
                     foreach (var pose in poseClassList)
                     {
@@ -846,7 +787,6 @@ public class HitPointManager : MonoBehaviour
 
                     if (!obstacleExists)
                     {
-                        // Add obstacle waypoint
                         AddNewWaypoint(hit.point, Quaternion.LookRotation(hit.normal), WaypointType.Obstacle);
                     }
                 }
@@ -862,7 +802,16 @@ public class HitPointManager : MonoBehaviour
     {
         Debug.Log("SaveAllTheInformationToFile called with filename: " + filename);
 
-        // If NavigationEnhancer is available, use enhanced map saving
+        // NEW: Use Enhanced3DMapManager if available
+        if (enhanced3DMapManager != null && enhanced3DMapManager.GetCurrentMap() != null)
+        {
+            if (string.IsNullOrEmpty(filename))
+                filename = "EnhancedMap_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
+            
+            enhanced3DMapManager.SaveEnhanced3DMap();
+            return;
+        }
+
         if (navigationEnhancer != null)
         {
             navigationEnhancer.SaveEnhancedMap(filename);
@@ -880,7 +829,6 @@ public class HitPointManager : MonoBehaviour
         string path = GetAndroidExternalStoragePath() + "/" + "ARCoreTrackables" + "/" + filename + ".csv";
         Debug.Log("Saving to path: " + path);
 
-        // Enhanced CSV format with additional data
         StringBuilder csvContent = new StringBuilder("TrackingID,Distance,PositionX,PositionY,PositionZ,RotationX,RotationY,RotationZ,RotationW,WaypointType,Description\n");
 
         foreach (var poseClass in poseClassList)
@@ -905,7 +853,6 @@ public class HitPointManager : MonoBehaviour
             csvContent.AppendLine($"{poseClass.trackingId},{poseClass.distance},{poseClass.position.x},{poseClass.position.y},{poseClass.position.z},{poseClass.rotation.x},{poseClass.rotation.y},{poseClass.rotation.z},{poseClass.rotation.w},{(int)poseClass.waypointType},{description}");
         }
 
-        // Ensure directory exists
         string directory = Path.GetDirectoryName(path);
         if (!Directory.Exists(directory))
         {
@@ -913,7 +860,6 @@ public class HitPointManager : MonoBehaviour
             Directory.CreateDirectory(directory);
         }
 
-        // Write file
         try
         {
             File.WriteAllText(path, csvContent.ToString());
@@ -932,7 +878,6 @@ public class HitPointManager : MonoBehaviour
                 textRefs.GetComponent<TextMeshProUGUI>().text = "File Saved At: " + path;
             }
 
-            // Update saved locations panel
             PopulateSavedLocations();
         }
         catch (Exception e)
@@ -947,13 +892,10 @@ public class HitPointManager : MonoBehaviour
 
     public void SaveAndExit()
     {
-        // Generate a filename with timestamp
         string filename = "Path_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
 
-        // Save the file
         SaveAllTheInformationToFile(filename);
 
-        // Wait a moment to ensure saving completes
         StartCoroutine(ExitAfterDelay(2.0f));
     }
 
@@ -961,21 +903,17 @@ public class HitPointManager : MonoBehaviour
     {
         yield return new WaitForSeconds(delay);
 
-        // Exit application
         Debug.Log("Exiting application");
 
 #if UNITY_EDITOR
-        // In editor, stop play mode
         UnityEditor.EditorApplication.isPlaying = false;
 #else
-    // On device, quit application
-    Application.Quit();
+        Application.Quit();
 #endif
     }
 
     public void PromptSavePathWithName()
     {
-        // Show text input field for filename
         filenameInputField.gameObject.SetActive(true);
         filenameInputField.text = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         filenameInputField.onEndEdit.RemoveAllListeners();
@@ -989,7 +927,6 @@ public class HitPointManager : MonoBehaviour
 
     public void PromptFilenameToLoad()
     {
-        // Show saved locations panel
         savedLocationPanel.SetActive(true);
 
         if (navigationManager != null && navigationManager.textToSpeech != null)
@@ -998,10 +935,36 @@ public class HitPointManager : MonoBehaviour
         }
     }
 
+    // NEW: Enhanced path loading method
+    public void LoadEnhancedPath(string pathName)
+    {
+        if (enhanced3DMapManager != null)
+        {
+            bool success = enhanced3DMapManager.LoadEnhanced3DMap(pathName);
+            if (!success)
+            {
+                // Fall back to loading regular CSV path
+                LoadPathFromFile(pathName + ".csv");
+            }
+        }
+        else
+        {
+            // Fall back to original loading
+            LoadPathFromFile(pathName);
+        }
+    }
+
     public void LoadPathFromFile(string filename)
     {
-        // If NavigationEnhancer is available and the file is a JSON, use enhanced loading
-        string jsonPath = Path.Combine(GetAndroidExternalStoragePath(), "ARCoreTrackables", filename);
+        // NEW: Check if this is an enhanced 3D map
+        if (filename.EndsWith(".json"))
+        {
+            string mapName = filename.Replace(".json", "");
+            LoadEnhancedPath(mapName);
+            savedLocationPanel.SetActive(false);
+            return;
+        }
+
         if (navigationEnhancer != null && filename.EndsWith(".json"))
         {
             navigationEnhancer.LoadEnhancedMap(Path.GetFileNameWithoutExtension(filename));
@@ -1009,7 +972,6 @@ public class HitPointManager : MonoBehaviour
             return;
         }
 
-        // Legacy loading method for CSV files
         ClearCurrentWaypoints();
         poseClassList.Clear();
 
@@ -1034,10 +996,10 @@ public class HitPointManager : MonoBehaviour
             int pathPoints = 0;
             int obstacles = 0;
 
-            for (int i = 1; i < lines.Length; i++) // skip header
+            for (int i = 1; i < lines.Length; i++)
             {
                 var tokens = lines[i].Split(',');
-                if (tokens.Length >= 10) // Ensure we have enough data
+                if (tokens.Length >= 10)
                 {
                     try
                     {
@@ -1067,7 +1029,6 @@ public class HitPointManager : MonoBehaviour
 
                         poseClassList.Add(poseClass);
 
-                        // Count types
                         switch (type)
                         {
                             case WaypointType.StartPoint: startPoints++; break;
@@ -1083,16 +1044,13 @@ public class HitPointManager : MonoBehaviour
                 }
             }
 
-            // Create waypoint visuals for all loaded points
             for (int i = 0; i < poseClassList.Count; i++)
             {
                 CreateWaypointVisual(i);
             }
 
-            // Hide the saved locations panel
             savedLocationPanel.SetActive(false);
 
-            // Provide audio feedback
             if (navigationManager != null && navigationManager.textToSpeech != null)
             {
                 navigationManager.textToSpeech.Speak(
@@ -1136,7 +1094,6 @@ public class HitPointManager : MonoBehaviour
         }
         else
         {
-            // For testing in editor
             return Application.persistentDataPath;
         }
     }
@@ -1150,7 +1107,6 @@ public class HitPointManager : MonoBehaviour
     }
 }
 
-// Helper class to identify waypoints
 public class WaypointIdentifier : MonoBehaviour
 {
     public int waypointIndex;

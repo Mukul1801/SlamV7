@@ -1008,7 +1008,7 @@ public class NavigationEnhancer : MonoBehaviour
         Vector3 userPosition = Camera.main.transform.position;
         
         // Build description
-        StringBuilder description = new StringBuilder();
+        StringBuilder surroundingDescription = new StringBuilder();
         
         // Check for nearby waypoints
         List<PoseClass> nearbyWaypoints = new List<PoseClass>();
@@ -1030,7 +1030,7 @@ public class NavigationEnhancer : MonoBehaviour
         // Describe landmarks
         if (nearbyWaypoints.Count > 0)
         {
-            description.Append("Nearby landmarks: ");
+            surroundingDescription.Append("Nearby landmarks: ");
             
             foreach (var waypoint in nearbyWaypoints)
             {
@@ -1041,33 +1041,33 @@ public class NavigationEnhancer : MonoBehaviour
                     ? waypoint.description 
                     : waypoint.waypointType.ToString();
                     
-                description.Append($"{landmarkName} {direction} {distance:F1} meters. ");
+                surroundingDescription.Append($"{landmarkName} {direction} {distance:F1} meters. ");
             }
         }
         
         // Describe obstacles
         if (nearbyObstacles.Count > 0)
         {
-            if (description.Length > 0)
-                description.Append(" ");
+            if (surroundingDescription.Length > 0)
+                surroundingDescription.Append(" ");
                 
-            description.Append($"There are {nearbyObstacles.Count} obstacles nearby. ");
+            surroundingDescription.Append($"There are {nearbyObstacles.Count} obstacles nearby. ");
             
             // Describe closest obstacle
             var closestObstacle = nearbyObstacles.OrderBy(p => Vector3.Distance(userPosition, p.position)).First();
             float obstacleDistance = Vector3.Distance(userPosition, closestObstacle.position);
             string obstacleDirection = GetDirectionName(userPosition, closestObstacle.position);
             
-            description.Append($"Closest obstacle is {obstacleDirection}, {obstacleDistance:F1} meters away.");
+            surroundingDescription.Append($"Closest obstacle is {obstacleDirection}, {obstacleDistance:F1} meters away.");
         }
         
         // Describe environment using ARFoundation data if available
-        DescribeAREnvironment(description);
+        DescribeAREnvironment(surroundingDescription);
         
         // If we haven't found much to describe
-        if (description.Length == 0)
+        if (surroundingDescription.Length == 0)
         {
-            description.Append("The path ahead appears clear.");
+            surroundingDescription.Append("The path ahead appears clear.");
             
             // NEW: Enhanced predictive guidance
             if (enablePredictiveGuidance && navigationManager.isNavigating && navigationManager.safePathPlanner != null)
@@ -1094,17 +1094,17 @@ public class NavigationEnhancer : MonoBehaviour
                         if (distanceToTurn < upcomingTurnAnnouncementDistance * 2) // Extended range for prediction
                         {
                             string turnDirection = turnAngle > 0 ? "right" : "left";
-                            description.Append($" Upcoming turn: {distanceToTurn:F1} meters ahead, turn {turnDirection}.");
+                            surroundingDescription.Append($" Upcoming turn: {distanceToTurn:F1} meters ahead, turn {turnDirection}.");
                         }
                     }
                 }
             }
         }
         
-        SpeakMessage(description.ToString());
+        SpeakMessage(surroundingDescription.ToString());
     }
     
-    private void DescribeAREnvironment(StringBuilder description)
+    private void DescribeAREnvironment(StringBuilder environmentDesc)
     {
         if (planeManager == null)
             return;
@@ -1136,19 +1136,19 @@ public class NavigationEnhancer : MonoBehaviour
         
         if (floors > 0 || walls > 0 || ceilings > 0)
         {
-            if (description.Length > 0)
-                description.Append(" ");
+            if (environmentDesc.Length > 0)
+                environmentDesc.Append(" ");
                 
-            description.Append("Environment: ");
+            environmentDesc.Append("Environment: ");
             
             if (floors > 0)
-                description.Append($"{floors} floor surfaces. ");
+                environmentDesc.Append($"{floors} floor surfaces. ");
                 
             if (walls > 0)
-                description.Append($"{walls} walls. ");
+                environmentDesc.Append($"{walls} walls. ");
                 
             if (ceilings > 0)
-                description.Append($"{ceilings} ceiling surfaces.");
+                environmentDesc.Append($"{ceilings} ceiling surfaces.");
         }
     }
     
@@ -1193,14 +1193,14 @@ public class NavigationEnhancer : MonoBehaviour
         Vector3 userForward = Camera.main.transform.forward;
         
         // Cast rays to detect obstacles
-        StringBuilder description = new StringBuilder();
+        StringBuilder aheadDescription = new StringBuilder();
         bool foundObstacle = false;
         
         // Forward ray
         RaycastHit hit;
         if (Physics.Raycast(userPosition, userForward, out hit, 5f))
         {
-            description.Append($"Object detected {hit.distance:F1} meters directly ahead. ");
+            aheadDescription.Append($"Object detected {hit.distance:F1} meters directly ahead. ");
             foundObstacle = true;
         }
         
@@ -1213,7 +1213,7 @@ public class NavigationEnhancer : MonoBehaviour
             if (Physics.Raycast(userPosition, rayDirection, out hit, 3f))
             {
                 string direction = angle > 0 ? "right" : "left";
-                description.Append($"Object {Mathf.Abs(angle):F0} degrees to your {direction}, {hit.distance:F1} meters away. ");
+                aheadDescription.Append($"Object {Mathf.Abs(angle):F0} degrees to your {direction}, {hit.distance:F1} meters away. ");
                 foundObstacle = true;
             }
         }
@@ -1233,10 +1233,10 @@ public class NavigationEnhancer : MonoBehaviour
                     float obstacleAngle = Vector3.SignedAngle(userForward, directionToObstacle, Vector3.up);
                     string obstacleDirection = GetDirectionName(userPosition, pose.position);
                     
-                    if (description.Length > 0)
-                        description.Append(" ");
+                    if (aheadDescription.Length > 0)
+                        aheadDescription.Append(" ");
                         
-                    description.Append($"Marked obstacle {obstacleDirection}, {distance:F1} meters away.");
+                    aheadDescription.Append($"Marked obstacle {obstacleDirection}, {distance:F1} meters away.");
                     foundObstacle = true;
                 }
             }
@@ -1249,18 +1249,18 @@ public class NavigationEnhancer : MonoBehaviour
                 {
                     string direction = GetDirectionName(userPosition, pose.position);
                     
-                    if (description.Length > 0)
-                        description.Append(" ");
+                    if (aheadDescription.Length > 0)
+                        aheadDescription.Append(" ");
                         
-                    description.Append($"{pose.description} {direction}, {distance:F1} meters away.");
+                    aheadDescription.Append($"{pose.description} {direction}, {distance:F1} meters away.");
                 }
             }
         }
         
         if (!foundObstacle)
-            description.Append("The path ahead appears clear.");
+            aheadDescription.Append("The path ahead appears clear.");
             
-        SpeakMessage(description.ToString());
+        SpeakMessage(aheadDescription.ToString());
     }
     
     // Describe the overall path quality and highlights
@@ -1272,16 +1272,16 @@ public class NavigationEnhancer : MonoBehaviour
             var currentMap = enhanced3DMapManager.GetCurrentMap();
             if (currentMap != null)
             {
-                string description = $"Enhanced path loaded: {currentMap.name}. ";
-                description += $"Total length: {currentMap.totalPathLength:F1} meters with {currentMap.waypoints.Count} waypoints. ";
+                string pathDescription = $"Enhanced path loaded: {currentMap.name}. ";
+                pathDescription += $"Total length: {currentMap.totalPathLength:F1} meters with {currentMap.waypoints.Count} waypoints. ";
                 
                 if (enhanced3DMapManager.IsNavigating())
                 {
                     int currentWaypoint = enhanced3DMapManager.GetCurrentWaypointIndex();
-                    description += $"Currently at waypoint {currentWaypoint + 1} of {currentMap.waypoints.Count}.";
+                    pathDescription += $"Currently at waypoint {currentWaypoint + 1} of {currentMap.waypoints.Count}.";
                 }
                 
-                SpeakMessage(description);
+                SpeakMessage(pathDescription);
                 return;
             }
         }
@@ -1327,13 +1327,13 @@ public class NavigationEnhancer : MonoBehaviour
         }
         
         // Build description
-        StringBuilder description = new StringBuilder();
-        description.Append($"Your route is {totalLength:F1} meters long with {turnCount} turns");
+        StringBuilder pathQualityDesc = new StringBuilder();
+        pathQualityDesc.Append($"Your route is {totalLength:F1} meters long with {turnCount} turns");
         
         if (obstacleCount > 0)
-            description.Append($" and {obstacleCount} marked obstacles along the way");
+            pathQualityDesc.Append($" and {obstacleCount} marked obstacles along the way");
             
-        description.Append(". ");
+        pathQualityDesc.Append(". ");
         
         // Add info about landmarks if available
         List<string> landmarks = new List<string>();
@@ -1345,29 +1345,29 @@ public class NavigationEnhancer : MonoBehaviour
         
         if (landmarks.Count > 0)
         {
-            description.Append("You will pass by ");
+            pathQualityDesc.Append("You will pass by ");
             
             for (int i = 0; i < Mathf.Min(landmarks.Count, 3); i++)
             {
                 if (i > 0)
                 {
                     if (i == landmarks.Count - 1 || i == 2)
-                        description.Append(" and ");
+                        pathQualityDesc.Append(" and ");
                     else
-                        description.Append(", ");
+                        pathQualityDesc.Append(", ");
                 }
                 
-                description.Append(landmarks[i]);
+                pathQualityDesc.Append(landmarks[i]);
             }
             
             if (landmarks.Count > 3)
-                description.Append($" and {landmarks.Count - 3} other landmarks");
+                pathQualityDesc.Append($" and {landmarks.Count - 3} other landmarks");
                 
-            description.Append(" along the way.");
+            pathQualityDesc.Append(" along the way.");
         }
         
         // Speak the description
-        SpeakMessage(description.ToString());
+        SpeakMessage(pathQualityDesc.ToString());
     }
     
     // Announce upcoming turns before we reach them

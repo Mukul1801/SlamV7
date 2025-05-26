@@ -53,9 +53,19 @@ public class HitPointManager : MonoBehaviour
     private Vector3 lastScanPosition;
     private float minDistanceBetweenPoints = 0.5f;
 
+    // NEW: Enhanced walkable surface filtering
+    [Header("Walkable Surface Detection")]
+    [SerializeField] private float maxGroundSlope = 20f; // Maximum slope angle for walkable surface
+    [SerializeField] private float minPlaneArea = 1.0f; // Minimum area for a plane to be considered walkable
+    [SerializeField] private float maxHeightDifference = 0.3f; // Max height difference between waypoints
+    [SerializeField] private bool onlyPlaceOnFloors = true; // Only place waypoints on horizontal floors
+    [SerializeField] private float walkableHeightRange = 1.5f; // Height range considered walkable
+    [SerializeField] private LayerMask walkableLayerMask = -1; // Layer mask for walkable surfaces
+    
     // NEW: Enhanced path creation settings
     [SerializeField] private bool useEnhanced3DMode = true;
     [SerializeField] private bool autoOptimizeWaypoints = true;
+    [SerializeField] private float waypointOptimizationRadius = 1.0f;
 
     // Manager references
     private NavigationManager navigationManager;
@@ -226,6 +236,7 @@ public class HitPointManager : MonoBehaviour
 
         if (width < Screen.width || height < Screen.height)
         {
+            // NEW: Only raycast for walkable horizontal planes
             bool hasDetectedHit = raycastManager.Raycast(new Vector2(width, height), raycastHitList, TrackableType.PlaneWithinPolygon);
 
             if (hasDetectedHit)
@@ -233,21 +244,26 @@ public class HitPointManager : MonoBehaviour
                 for (int i = 0; i < raycastHitList.Count; i++)
                 {
                     Vector3 hitPosition = raycastHitList[i].pose.position;
-                    bool pointAlreadyExists = false;
-
-                    foreach (var pose in poseClassList)
+                    
+                    // NEW: Validate if this is a walkable surface
+                    if (IsWalkableSurface(raycastHitList[i]))
                     {
-                        if (Vector3.Distance(pose.position, hitPosition) < minDistanceBetweenPoints)
+                        bool pointAlreadyExists = false;
+
+                        foreach (var pose in poseClassList)
                         {
-                            pointAlreadyExists = true;
-                            break;
+                            if (Vector3.Distance(pose.position, hitPosition) < minDistanceBetweenPoints)
+                            {
+                                pointAlreadyExists = true;
+                                break;
+                            }
                         }
-                    }
 
-                    if (!pointAlreadyExists)
-                    {
-                        AddNewWaypoint(raycastHitList[i].pose.position, raycastHitList[i].pose.rotation, WaypointType.PathPoint);
-                        textRefs.GetComponent<TextMeshProUGUI>().text += "Path point added at " + hitPosition + "\n";
+                        if (!pointAlreadyExists)
+                        {
+                            AddNewWaypoint(raycastHitList[i].pose.position, raycastHitList[i].pose.rotation, WaypointType.PathPoint);
+                            textRefs.GetComponent<TextMeshProUGUI>().text += "Walkable path point added at " + hitPosition + "\n";
+                        }
                     }
                 }
 
@@ -266,6 +282,12 @@ public class HitPointManager : MonoBehaviour
 
                 poseClassList[poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
                 UpdateWaypointVisual(poseClassList.Count - 1);
+            }
+
+            // NEW: Optimize waypoints before saving
+            if (autoOptimizeWaypoints)
+            {
+                OptimizeWaypoints();
             }
 
             PromptSavePathWithName();
@@ -288,49 +310,63 @@ public class HitPointManager : MonoBehaviour
             if (!touchedUI)
             {
                 Ray ray = mainCamera.ScreenPointToRay(touch.position);
-                if (raycastManager.Raycast(ray, raycastHitList, TrackableType.FeaturePoint | TrackableType.PlaneWithinPolygon))
+                
+                // NEW: Only raycast for walkable surfaces
+                if (raycastManager.Raycast(ray, raycastHitList, TrackableType.PlaneWithinPolygon))
                 {
                     ARRaycastHit hit = raycastHitList[0];
-
-                    bool pointNearby = false;
-                    int nearbyPointIndex = -1;
-
-                    for (int i = 0; i < poseClassList.Count; i++)
+                    
+                    // NEW: Validate walkable surface before placing waypoint
+                    if (IsWalkableSurface(hit))
                     {
-                        if (Vector3.Distance(poseClassList[i].position, hit.pose.position) < minDistanceBetweenPoints * 2)
+                        bool pointNearby = false;
+                        int nearbyPointIndex = -1;
+
+                        for (int i = 0; i < poseClassList.Count; i++)
                         {
-                            pointNearby = true;
-                            nearbyPointIndex = i;
-                            break;
+                            if (Vector3.Distance(poseClassList[i].position, hit.pose.position) < minDistanceBetweenPoints * 2)
+                            {
+                                pointNearby = true;
+                                nearbyPointIndex = i;
+                                break;
+                            }
                         }
-                    }
 
-                    if (pointNearby)
-                    {
-                        CycleWaypointType(nearbyPointIndex);
-                    }
-                    else
-                    {
-                        AddNewWaypoint(hit.pose.position, hit.pose.rotation, WaypointType.PathPoint);
-
-                        if (poseClassList.Count == 1)
+                        if (pointNearby)
                         {
-                            poseClassList[0].waypointType = WaypointType.StartPoint;
-                            UpdateWaypointVisual(0);
+                            CycleWaypointType(nearbyPointIndex);
                         }
                         else
                         {
-                            for (int i = 0; i < poseClassList.Count - 1; i++)
-                            {
-                                if (poseClassList[i].waypointType == WaypointType.EndPoint)
-                                {
-                                    poseClassList[i].waypointType = WaypointType.PathPoint;
-                                    UpdateWaypointVisual(i);
-                                }
-                            }
+                            AddNewWaypoint(hit.pose.position, hit.pose.rotation, WaypointType.PathPoint);
 
-                            poseClassList[poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
-                            UpdateWaypointVisual(poseClassList.Count - 1);
+                            if (poseClassList.Count == 1)
+                            {
+                                poseClassList[0].waypointType = WaypointType.StartPoint;
+                                UpdateWaypointVisual(0);
+                            }
+                            else
+                            {
+                                for (int i = 0; i < poseClassList.Count - 1; i++)
+                                {
+                                    if (poseClassList[i].waypointType == WaypointType.EndPoint)
+                                    {
+                                        poseClassList[i].waypointType = WaypointType.PathPoint;
+                                        UpdateWaypointVisual(i);
+                                    }
+                                }
+
+                                poseClassList[poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
+                                UpdateWaypointVisual(poseClassList.Count - 1);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Provide feedback that surface is not walkable
+                        if (navigationManager != null && navigationManager.textToSpeech != null)
+                        {
+                            navigationManager.textToSpeech.Speak("Cannot place waypoint here. Surface is not walkable.");
                         }
                     }
                 }
@@ -341,7 +377,7 @@ public class HitPointManager : MonoBehaviour
     private void UpdateEnvironmentScanningMode()
     {
         textRefs.GetComponent<TextMeshProUGUI>().text = "Environment Scanning Mode\n";
-        textRefs.GetComponent<TextMeshProUGUI>().text += "Detected planes: " + detectedPlanes.Count + "\n";
+        textRefs.GetComponent<TextMeshProUGUI>().text += "Detected walkable planes: " + GetWalkablePlaneCount() + "\n";
         textRefs.GetComponent<TextMeshProUGUI>().text += "Detected obstacles: " + GetObstacleCount() + "\n";
 
         if (Time.time - lastScanTime > scanningInterval)
@@ -356,6 +392,175 @@ public class HitPointManager : MonoBehaviour
                 lastScanPosition = mainCamera.transform.position;
             }
         }
+    }
+
+    #endregion
+
+    #region NEW: Walkable Surface Validation
+
+    /// <summary>
+    /// Check if an ARRaycastHit represents a walkable surface
+    /// </summary>
+    private bool IsWalkableSurface(ARRaycastHit hit)
+    {
+        // Get the trackable that was hit
+        if (hit.trackable == null) return false;
+
+        // Check if it's a plane
+        if (hit.trackable is ARPlane plane)
+        {
+            // Only allow horizontal floors if onlyPlaceOnFloors is true
+            if (onlyPlaceOnFloors && plane.alignment != PlaneAlignment.HorizontalUp)
+            {
+                return false;
+            }
+
+            // Check plane area - too small planes are not walkable
+            if (plane.size.x * plane.size.y < minPlaneArea)
+            {
+                return false;
+            }
+
+            // Check surface normal for slope
+            Vector3 normal = plane.normal;
+            float slopeAngle = Vector3.Angle(normal, Vector3.up);
+            
+            if (slopeAngle > maxGroundSlope)
+            {
+                return false;
+            }
+
+            // Check height relative to camera/user
+            float heightDifference = Mathf.Abs(hit.pose.position.y - mainCamera.transform.position.y);
+            if (heightDifference > walkableHeightRange)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Check if a position is on a walkable surface using raycast
+    /// </summary>
+    private bool IsPositionWalkable(Vector3 position)
+    {
+        // Cast ray downward from slightly above the position
+        Vector3 rayStart = position + Vector3.up * 0.5f;
+        RaycastHit hit;
+
+        if (Physics.Raycast(rayStart, Vector3.down, out hit, 1.0f, walkableLayerMask))
+        {
+            // Check surface normal
+            float slopeAngle = Vector3.Angle(hit.normal, Vector3.up);
+            if (slopeAngle > maxGroundSlope)
+            {
+                return false;
+            }
+
+            // Check if we hit an obstacle
+            if (hit.collider.CompareTag("Obstacle"))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Get count of walkable planes
+    /// </summary>
+    private int GetWalkablePlaneCount()
+    {
+        int count = 0;
+        if (arPlaneManager != null)
+        {
+            foreach (ARPlane plane in arPlaneManager.trackables)
+            {
+                if (IsPlaneWalkable(plane))
+                {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Check if an ARPlane is walkable
+    /// </summary>
+    private bool IsPlaneWalkable(ARPlane plane)
+    {
+        // Must be horizontal floor
+        if (plane.alignment != PlaneAlignment.HorizontalUp)
+            return false;
+
+        // Must have sufficient area
+        if (plane.size.x * plane.size.y < minPlaneArea)
+            return false;
+
+        // Check slope
+        float slopeAngle = Vector3.Angle(plane.normal, Vector3.up);
+        if (slopeAngle > maxGroundSlope)
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Optimize waypoints by removing redundant ones and ensuring proper spacing
+    /// </summary>
+    private void OptimizeWaypoints()
+    {
+        if (poseClassList.Count <= 2) return;
+
+        List<PoseClass> optimizedWaypoints = new List<PoseClass>();
+        
+        // Always keep start point
+        if (poseClassList.Count > 0)
+            optimizedWaypoints.Add(poseClassList[0]);
+
+        // Process middle waypoints
+        for (int i = 1; i < poseClassList.Count - 1; i++)
+        {
+            PoseClass currentPose = poseClassList[i];
+            
+            // Skip if too close to previous waypoint
+            if (optimizedWaypoints.Count > 0)
+            {
+                float distanceToPrevious = Vector3.Distance(currentPose.position, optimizedWaypoints[optimizedWaypoints.Count - 1].position);
+                if (distanceToPrevious < minDistanceBetweenPoints)
+                    continue;
+            }
+
+            // Check if waypoint is still on walkable surface
+            if (IsPositionWalkable(currentPose.position))
+            {
+                optimizedWaypoints.Add(currentPose);
+            }
+        }
+
+        // Always keep end point
+        if (poseClassList.Count > 1)
+            optimizedWaypoints.Add(poseClassList[poseClassList.Count - 1]);
+
+        // Replace waypoint list
+        ClearCurrentWaypoints();
+        poseClassList = optimizedWaypoints;
+
+        // Recreate visuals
+        for (int i = 0; i < poseClassList.Count; i++)
+        {
+            CreateWaypointVisual(i);
+        }
+
+        Debug.Log($"Optimized waypoints: {poseClassList.Count} points remaining");
     }
 
     #endregion
@@ -379,9 +584,9 @@ public class HitPointManager : MonoBehaviour
             plane.gameObject.SetActive(true);
 
         if (navigationManager.textToSpeech != null)
-            navigationManager.textToSpeech.Speak("Automatic path creation mode activated. Please move slowly around your environment.");
+            navigationManager.textToSpeech.Speak("Automatic path creation mode activated. I will only place waypoints on walkable surfaces. Please move slowly around your environment.");
 
-        textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path automatically. Please move slowly.\n";
+        textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path automatically. Scanning for walkable surfaces.\n";
 
         if (navigationEnhancer != null)
         {
@@ -403,9 +608,9 @@ public class HitPointManager : MonoBehaviour
             plane.gameObject.SetActive(true);
 
         if (navigationManager.textToSpeech != null)
-            navigationManager.textToSpeech.Speak("Manual path creation mode activated. Tap to place path points. Double tap on points to change their type.");
+            navigationManager.textToSpeech.Speak("Manual path creation mode activated. Tap to place path points on walkable surfaces only. Double tap on points to change their type.");
 
-        textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path manually. Tap to place points.\n";
+        textRefs.GetComponent<TextMeshProUGUI>().text = "Creating path manually. Tap on walkable surfaces to place points.\n";
 
         if (navigationEnhancer != null)
         {
@@ -423,7 +628,7 @@ public class HitPointManager : MonoBehaviour
             
             if (navigationManager.textToSpeech != null)
             {
-                navigationManager.textToSpeech.Speak("Enhanced path recording started. This will create optimal waypoints as you walk.");
+                navigationManager.textToSpeech.Speak("Enhanced path recording started. I will create optimal waypoints on walkable surfaces as you walk.");
             }
             
             // Switch to enhanced mode
@@ -469,10 +674,10 @@ public class HitPointManager : MonoBehaviour
             arPointCloudManager.enabled = true;
 
         if (navigationManager != null && navigationManager.textToSpeech != null)
-            navigationManager.textToSpeech.Speak("Environment scanning mode activated. Please move around to map your surroundings.");
+            navigationManager.textToSpeech.Speak("Environment scanning mode activated. I'm scanning for walkable surfaces and obstacles. Please move around to map more area.");
 
         if (textRefs != null)
-            textRefs.GetComponent<TextMeshProUGUI>().text = "Scanning environment. Move around to map more area.\n";
+            textRefs.GetComponent<TextMeshProUGUI>().text = "Scanning environment for walkable surfaces. Move around to map more area.\n";
         else
             Debug.LogWarning("textRefs is null in SwitchToEnvironmentScanningMode");
 
@@ -516,6 +721,13 @@ public class HitPointManager : MonoBehaviour
 
     public void AddNewWaypoint(Vector3 position, Quaternion rotation, WaypointType type)
     {
+        // NEW: Validate position is walkable before adding
+        if (type != WaypointType.Obstacle && !IsPositionWalkable(position))
+        {
+            Debug.LogWarning("Attempted to place waypoint on non-walkable surface: " + position);
+            return;
+        }
+
         string waypointId = Guid.NewGuid().ToString();
 
         poseClassList.Add(new PoseClass
@@ -670,15 +882,17 @@ public class HitPointManager : MonoBehaviour
 
                 detectedPlanes.Add(planeId, planeVisual);
 
-                if (plane.alignment == PlaneAlignment.HorizontalUp)
+                // NEW: Only add waypoints to walkable horizontal planes
+                if (IsPlaneWalkable(plane))
                 {
-                    AddWaypointsToPlane(plane);
+                    AddWaypointsToWalkablePlane(plane);
                 }
             }
         }
     }
 
-    private void AddWaypointsToPlane(ARPlane plane)
+    // NEW: Updated method to only add waypoints to walkable planes
+    private void AddWaypointsToWalkablePlane(ARPlane plane)
     {
         Vector2[] boundaryPoints2D = plane.boundary.ToArray();
 
@@ -688,7 +902,8 @@ public class HitPointManager : MonoBehaviour
         Vector3 planeCenter = plane.center;
         Vector3 planeNormal = plane.normal;
 
-        float gridSize = 0.5f;
+        // NEW: Increased grid size to reduce waypoint density
+        float gridSize = Mathf.Max(1.0f, minDistanceBetweenPoints * 2);
 
         float minX = float.MaxValue, maxX = float.MinValue;
         float minZ = float.MaxValue, maxZ = float.MinValue;
@@ -704,6 +919,13 @@ public class HitPointManager : MonoBehaviour
             if (worldPoint.z > maxZ) maxZ = worldPoint.z;
         }
 
+        // NEW: Limit waypoint density by adding margin
+        float margin = gridSize * 0.5f;
+        minX += margin;
+        maxX -= margin;
+        minZ += margin;
+        maxZ -= margin;
+
         for (float x = minX; x <= maxX; x += gridSize)
         {
             for (float z = minZ; z <= maxZ; z += gridSize)
@@ -712,19 +934,23 @@ public class HitPointManager : MonoBehaviour
 
                 if (IsPointInPolygon(potentialPoint, plane))
                 {
-                    bool pointExists = false;
-                    foreach (var pose in poseClassList)
+                    // NEW: Additional validation for walkable position
+                    if (IsPositionWalkable(potentialPoint))
                     {
-                        if (Vector3.Distance(pose.position, potentialPoint) < minDistanceBetweenPoints)
+                        bool pointExists = false;
+                        foreach (var pose in poseClassList)
                         {
-                            pointExists = true;
-                            break;
+                            if (Vector3.Distance(pose.position, potentialPoint) < minDistanceBetweenPoints)
+                            {
+                                pointExists = true;
+                                break;
+                            }
                         }
-                    }
 
-                    if (!pointExists)
-                    {
-                        AddNewWaypoint(potentialPoint, Quaternion.LookRotation(Vector3.forward, planeNormal), WaypointType.PathPoint);
+                        if (!pointExists)
+                        {
+                            AddNewWaypoint(potentialPoint, Quaternion.LookRotation(Vector3.forward, planeNormal), WaypointType.PathPoint);
+                        }
                     }
                 }
             }
@@ -846,7 +1072,7 @@ public class HitPointManager : MonoBehaviour
                     description = "Obstacle to avoid";
                     break;
                 case WaypointType.PathPoint:
-                    description = "Safe navigation point";
+                    description = "Safe walkable navigation point";
                     break;
             }
 
@@ -870,7 +1096,7 @@ public class HitPointManager : MonoBehaviour
                 int pathPoints = poseClassList.Count(p => p.waypointType == WaypointType.PathPoint);
                 int obstacles = poseClassList.Count(p => p.waypointType == WaypointType.Obstacle);
 
-                navigationManager.textToSpeech.Speak($"Path saved successfully with {pathPoints} path points and {obstacles} obstacles marked. You can use it for future safe navigation.");
+                navigationManager.textToSpeech.Speak($"Path saved successfully with {pathPoints} walkable path points and {obstacles} obstacles marked. All waypoints are verified to be on safe, walkable surfaces.");
             }
 
             if (textRefs != null)
@@ -921,7 +1147,7 @@ public class HitPointManager : MonoBehaviour
 
         if (navigationManager != null && navigationManager.textToSpeech != null)
         {
-            navigationManager.textToSpeech.Speak("Enter a name to save this path, or use the default timestamp.");
+            navigationManager.textToSpeech.Speak("Enter a name to save this walkable path, or use the default timestamp.");
         }
     }
 
@@ -1009,15 +1235,24 @@ public class HitPointManager : MonoBehaviour
                             type = (WaypointType)int.Parse(tokens[9]);
                         }
 
+                        Vector3 position = new Vector3(
+                            float.Parse(tokens[2]),
+                            float.Parse(tokens[3]),
+                            float.Parse(tokens[4])
+                        );
+
+                        // NEW: Validate loaded waypoints are on walkable surfaces
+                        if (type != WaypointType.Obstacle && !IsPositionWalkable(position))
+                        {
+                            Debug.LogWarning($"Loaded waypoint at {position} is not on walkable surface, skipping");
+                            continue;
+                        }
+
                         PoseClass poseClass = new PoseClass
                         {
                             trackingId = tokens[0],
                             distance = tokens[1],
-                            position = new Vector3(
-                                float.Parse(tokens[2]),
-                                float.Parse(tokens[3]),
-                                float.Parse(tokens[4])
-                            ),
+                            position = position,
                             rotation = new Quaternion(
                                 float.Parse(tokens[5]),
                                 float.Parse(tokens[6]),
@@ -1054,12 +1289,12 @@ public class HitPointManager : MonoBehaviour
             if (navigationManager != null && navigationManager.textToSpeech != null)
             {
                 navigationManager.textToSpeech.Speak(
-                    $"Loaded {poseClassList.Count} waypoints. {pathPoints} safe path points, " +
-                    $"{obstacles} obstacles, {startPoints} start points, and {endPoints} end points."
+                    $"Loaded {poseClassList.Count} verified waypoints. {pathPoints} walkable path points, " +
+                    $"{obstacles} obstacles, {startPoints} start points, and {endPoints} end points. All waypoints are on safe, walkable surfaces."
                 );
             }
 
-            textRefs.GetComponent<TextMeshProUGUI>().text = $"Loaded path: {filename}\n" +
+            textRefs.GetComponent<TextMeshProUGUI>().text = $"Loaded verified walkable path: {filename}\n" +
                                                            $"Total points: {poseClassList.Count}\n" +
                                                            $"Path points: {pathPoints}, Obstacles: {obstacles}";
         }

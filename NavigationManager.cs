@@ -251,70 +251,70 @@ public class NavigationManager : MonoBehaviour
     
             bool hasStartPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.StartPoint);
             bool hasEndPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.EndPoint);
-    
-            if (!hasStartPoint || !hasEndPoint)
+
+        if (!hasStartPoint || !hasEndPoint)
+        {
+            if (hitPointManager.poseClassList.Count >= 2)
             {
-                if (hitPointManager.poseClassList.Count >= 2)
-                {
-                    hitPointManager.poseClassList[0].waypointType = WaypointType.StartPoint;
-                    hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
-    
-                    SpeakMessage("No explicit start and end points found. Using first and last points instead.");
-                }
-                else
-                {
-                    SpeakMessage("Error: At least two points are needed for navigation - a start and an end point.");
-                    PlaySound(errorSound);
-                    return;
-                }
-            }
-    
-            bool pathPlanned = safePathPlanner.PlanSafePath();
-    
-            if (pathPlanned)
-            {
-                isNavigating = true;
-                lastUpdatePosition = Camera.main.transform.position;
-                destinationAnnouncementStarted = false;
-                lastEnvironmentAnnouncement = Time.time;
-    
-                spokenDirections.Clear();
-    
-                PlaySound(pathStartedSound);
-    
-                SpeakMessage("Navigation started. Follow the audio cues to safely reach your destination.");
-    
-                if (useContinuousBeacon)
-                {
-                    StartBeacon();
-                }
-    
-                if (useVibration)
-                    Vibrate();
-    
-                GiveDirectionToNextPathPoint(true);
-    
-                UpdateDebugText("Navigation active - follow audio cues.");
-    
-                if (navigationEnhancer != null && useDetailedAudioDescriptions)
-                {
-                    StartCoroutine(DelayedPathDescription(3.0f));
-                }
+                hitPointManager.poseClassList[0].waypointType = WaypointType.StartPoint;
+                hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
+
+                SpeakMessage("No explicit start and end points found. Using first and last points instead.");
             }
             else
             {
-                SpeakMessage("Unable to find a safe path to your destination. Please try again in a different location.");
+                SpeakMessage("Error: At least two points are needed for navigation - a start and an end point.");
                 PlaySound(errorSound);
-                UpdateDebugText("Error: No safe path found");
+                return;
+            }
+        }
+
+        bool pathPlanned = safePathPlanner.PlanSafePath();
+
+        if (pathPlanned)
+        {
+            isNavigating = true;
+            lastUpdatePosition = Camera.main.transform.position;
+            destinationAnnouncementStarted = false;
+            lastEnvironmentAnnouncement = Time.time;
+
+            spokenDirections.Clear();
+
+            PlaySound(pathStartedSound);
+
+            SpeakMessage("Navigation started. Follow the audio cues to safely reach your destination.");
+
+            if (useContinuousBeacon)
+            {
+                StartBeacon();
+            }
+
+            if (useVibration)
+                Vibrate();
+
+            GiveDirectionToNextPathPoint(true);
+
+            UpdateDebugText("Navigation active - follow audio cues.");
+
+            if (navigationEnhancer != null && useDetailedAudioDescriptions)
+            {
+                StartCoroutine(DelayedPathDescription(3.0f));
             }
         }
         else
         {
-            SpeakMessage("No waypoints available. Please load a path or create a new one.");
+            SpeakMessage("Unable to find a safe path to your destination. Please try again in a different location.");
             PlaySound(errorSound);
-            UpdateDebugText("Error: No waypoints available");
+            UpdateDebugText("Error: No safe path found");
         }
     }
+    else
+    {
+        SpeakMessage("No waypoints available. Please load a path or create a new one.");
+        PlaySound(errorSound);
+        UpdateDebugText("Error: No waypoints available");
+    }
+}
 
     private IEnumerator DelayedPathDescription(float delay)
     {

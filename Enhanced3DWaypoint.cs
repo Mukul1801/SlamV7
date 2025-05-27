@@ -1020,6 +1020,17 @@ public class Enhanced3DMapManager : MonoBehaviour
         {
             hitPointManager.ClearCurrentWaypoints();
             hitPointManager.poseClassList.Clear();
+
+            // Reset modes to exit scanning/tracking
+            // If using public fields:
+            hitPointManager.isPathCreationMode = false;
+            hitPointManager.isManualPathCreationMode = false;
+            hitPointManager.isScanningMode = false;
+            
+            // OR if using properties:
+            // hitPointManager.IsPathCreationMode = false;
+            // hitPointManager.IsManualPathCreationMode = false;
+            // hitPointManager.IsScanningMode = false;
         }
 
         // Load enhanced waypoints

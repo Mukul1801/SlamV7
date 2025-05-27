@@ -13,7 +13,7 @@ public class NavigationManager : MonoBehaviour
     public AudioSource audioSource;
     public TextToSpeech textToSpeech;
     public NavigationEnhancer navigationEnhancer;
-    private Enhanced3DMapManager enhanced3DMapManager; // New integration
+    public Enhanced3DMapManager enhanced3DMapManager; // New integration
 
     [Header("Audio Feedback")]
     public AudioClip waypointReachedSound;
@@ -25,7 +25,7 @@ public class NavigationManager : MonoBehaviour
     public AudioClip pathStartedSound;
     public AudioClip errorSound;
     public AudioClip beaconSound;
-    
+
     [Header("3D Audio")]
     public bool use3DAudio = true;
     public float maxAudioDistance = 20f;
@@ -39,7 +39,7 @@ public class NavigationManager : MonoBehaviour
 
     [Header("Navigation Settings")]
     public float waypointReachedDistance = 1.0f;
-    public float directionUpdateFrequency = 2.0f;
+    public float directionUpdateFrequency = 1.0f;
     public float obstacleWarningDistance = 2.5f;
     public bool isNavigating = false;
     public bool useDistanceBasedGuidance = true;
@@ -288,7 +288,7 @@ public class NavigationManager : MonoBehaviour
                 GiveDirectionToNextPathPoint(true);
 
                 UpdateDebugText("Navigation active - follow audio cues.");
-                
+
                 if (navigationEnhancer != null && useDetailedAudioDescriptions)
                 {
                     StartCoroutine(DelayedPathDescription(3.0f));
@@ -312,7 +312,7 @@ public class NavigationManager : MonoBehaviour
     private IEnumerator DelayedPathDescription(float delay)
     {
         yield return new WaitForSeconds(delay);
-        
+
         if (navigationEnhancer != null)
         {
             navigationEnhancer.DescribePathQuality();
@@ -419,7 +419,7 @@ public class NavigationManager : MonoBehaviour
 
     private void WarnAboutNearbyObstacles(Vector3 userPosition)
     {
-        bool obstacleWarningGiven = false;
+        //bool obstacleWarningGiven = false;
         List<PoseClass> nearbyObstacles = new List<PoseClass>();
 
         foreach (var pose in hitPointManager.poseClassList)
@@ -460,19 +460,19 @@ public class NavigationManager : MonoBehaviour
             if (Mathf.Abs(angle) < 60f)
             {
                 float warningVolume = Mathf.Lerp(0.3f, 1.0f, 1.0f - (obstacleDistance / obstacleWarningDistance));
-                
+
                 if (use3DAudio && audioSource != null)
                 {
                     audioSource.transform.position = closestObstacle.position;
                 }
-                
+
                 PlaySound(obstacleNearbySound, warningVolume);
-                obstacleWarningGiven = true;
+                //obstacleWarningGiven = true;
 
                 if (useVibration)
                 {
                     float intensity = Mathf.Lerp(0.3f, 1.0f, 1.0f - (obstacleDistance / obstacleWarningDistance));
-                    
+
                     if (hapticFeedbackMode == 2)
                     {
                         if (angle < -30f)
@@ -509,21 +509,21 @@ public class NavigationManager : MonoBehaviour
         {
             Vector3 enhancedUserPos = Camera.main.transform.position;
             Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
-            
+
             Vector3 enhancedUserFwd = Camera.main.transform.forward;
             enhancedUserFwd.y = 0;
             enhancedUserFwd.Normalize();
-            
+
             Vector3 directionToPoint = nextPoint - enhancedUserPos;
             directionToPoint.y = 0;
-            
+
             if (directionToPoint.magnitude > 0.1f)
             {
                 directionToPoint.Normalize();
-                
+
                 float enhancedAngle = Vector3.SignedAngle(enhancedUserFwd, directionToPoint, Vector3.up);
                 float enhancedDistance = Vector3.Distance(enhancedUserPos, nextPoint);
-                
+
                 navigationEnhancer.ProvideEnhancedDirections(enhancedUserPos, nextPoint, enhancedAngle, enhancedDistance);
                 return;
             }
@@ -588,29 +588,29 @@ public class NavigationManager : MonoBehaviour
             {
                 directionMessage = "Continue " + direction + " for " + distanceStr + " meters." + pathDescription;
             }
-            
+
             if (currentPathIndex < safePathPlanner.GetPathCount() - 1)
             {
                 waypointAnnouncementNeeded = true;
                 nextWaypointDescription = "Waypoint reached. ";
-                
+
                 int nextObstacleCount = CountNearbyObstacles(nextPathPoint, 3.0f);
                 if (nextObstacleCount > 0)
                 {
-                    nextWaypointDescription += nextObstacleCount == 1 
-                        ? "There is an obstacle nearby. " 
+                    nextWaypointDescription += nextObstacleCount == 1
+                        ? "There is an obstacle nearby. "
                         : "There are " + nextObstacleCount + " obstacles nearby. ";
                 }
-                
+
                 if (currentPathIndex + 1 < safePathPlanner.GetPathCount() - 1)
                 {
                     Vector3 pointAfterNext = safePathPlanner.GetPathPointAt(currentPathIndex + 2);
                     Vector3 nextSegmentDirection = pointAfterNext - nextPathPoint;
                     nextSegmentDirection.y = 0;
                     nextSegmentDirection.Normalize();
-                    
+
                     float turnAngle = Vector3.SignedAngle(directionToPathPoint, nextSegmentDirection, Vector3.up);
-                    
+
                     if (Mathf.Abs(turnAngle) > turnAngleThreshold)
                     {
                         string turnDirection = turnAngle > 0 ? "right" : "left";
@@ -671,7 +671,7 @@ public class NavigationManager : MonoBehaviour
                 float distance = Vector3.Distance(
                     new Vector3(position.x, 0, position.z),
                     new Vector3(pose.position.x, 0, pose.position.z));
-                    
+
                 if (distance < radius)
                 {
                     count++;
@@ -684,17 +684,17 @@ public class NavigationManager : MonoBehaviour
     private void AnnounceWaypointReached()
     {
         PlaySound(waypointReachedSound);
-        
+
         if (useVibration && hapticFeedbackMode >= 1)
         {
             Vibrate(0.6f, 0.15f);
         }
-        
+
         if (!string.IsNullOrEmpty(nextWaypointDescription))
         {
             SpeakMessage(nextWaypointDescription);
         }
-        
+
         waypointAnnouncementNeeded = false;
         nextWaypointDescription = "";
     }
@@ -802,11 +802,11 @@ public class NavigationManager : MonoBehaviour
         if (beaconAudioSource != null && beaconSound != null)
         {
             StopBeacon();
-            
+
             isBeaconActive = true;
             beaconAudioSource.clip = beaconSound;
             beaconAudioSource.Play();
-            
+
             beaconCoroutine = StartCoroutine(UpdateBeaconPosition());
         }
     }
@@ -818,7 +818,7 @@ public class NavigationManager : MonoBehaviour
             beaconAudioSource.Stop();
             isBeaconActive = false;
         }
-        
+
         if (beaconCoroutine != null)
         {
             StopCoroutine(beaconCoroutine);
@@ -833,20 +833,20 @@ public class NavigationManager : MonoBehaviour
             if (safePathPlanner != null && safePathPlanner.GetPathCount() > safePathPlanner.GetCurrentPathIndex())
             {
                 Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
-                
+
                 int lookAheadCount = Mathf.Min(3, safePathPlanner.GetPathCount() - safePathPlanner.GetCurrentPathIndex() - 1);
                 if (lookAheadCount > 0)
                 {
                     Vector3 lookAheadPoint = safePathPlanner.GetPathPointAt(safePathPlanner.GetCurrentPathIndex() + lookAheadCount);
                     nextPoint = Vector3.Lerp(nextPoint, lookAheadPoint, 0.3f);
                 }
-                
+
                 if (beaconAudioSource != null)
                 {
                     beaconAudioSource.transform.position = nextPoint;
                 }
             }
-            
+
             yield return new WaitForSeconds(0.2f);
         }
     }
@@ -855,22 +855,22 @@ public class NavigationManager : MonoBehaviour
     {
         if (!isBeaconActive || beaconAudioSource == null)
             return;
-            
+
         if (safePathPlanner != null && safePathPlanner.GetPathCount() > safePathPlanner.GetCurrentPathIndex())
         {
             Vector3 nextPoint = safePathPlanner.GetNextPathPoint();
             Vector3 userPos = Camera.main.transform.position;
-            
+
             Vector3 directionToPoint = nextPoint - userPos;
             directionToPoint.y = 0;
             directionToPoint.Normalize();
-            
+
             Vector3 userForward = Camera.main.transform.forward;
             userForward.y = 0;
             userForward.Normalize();
-            
+
             float facingDot = Vector3.Dot(userForward, directionToPoint);
-            
+
             float targetVolume = Mathf.Lerp(beaconMinimumVolume, beaconMaximumVolume, (facingDot + 1) / 2);
             beaconAudioSource.volume = Mathf.Lerp(beaconAudioSource.volume, targetVolume, Time.deltaTime * 2);
         }

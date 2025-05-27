@@ -1190,19 +1190,19 @@ public class HitPointManager : MonoBehaviour
             savedLocationPanel.SetActive(false);
             return;
         }
-
+    
         if (navigationEnhancer != null && filename.EndsWith(".json"))
         {
             navigationEnhancer.LoadEnhancedMap(Path.GetFileNameWithoutExtension(filename));
             savedLocationPanel.SetActive(false);
             return;
         }
-
+    
         ClearCurrentWaypoints();
         poseClassList.Clear();
-
+    
         string path = GetAndroidExternalStoragePath() + "/" + "ARCoreTrackables" + "/" + filename;
-
+    
         if (!File.Exists(path))
         {
             textRefs.GetComponent<TextMeshProUGUI>().text = "File not found: " + path;
@@ -1212,16 +1212,16 @@ public class HitPointManager : MonoBehaviour
             }
             return;
         }
-
+    
         try
         {
             var lines = File.ReadAllLines(path);
-
+    
             int startPoints = 0;
             int endPoints = 0;
             int pathPoints = 0;
             int obstacles = 0;
-
+    
             for (int i = 1; i < lines.Length; i++)
             {
                 var tokens = lines[i].Split(',');
@@ -1234,20 +1234,20 @@ public class HitPointManager : MonoBehaviour
                         {
                             type = (WaypointType)int.Parse(tokens[9]);
                         }
-
+    
                         Vector3 position = new Vector3(
                             float.Parse(tokens[2]),
                             float.Parse(tokens[3]),
                             float.Parse(tokens[4])
                         );
-
+    
                         // NEW: Validate loaded waypoints are on walkable surfaces
                         if (type != WaypointType.Obstacle && !IsPositionWalkable(position))
                         {
                             Debug.LogWarning($"Loaded waypoint at {position} is not on walkable surface, skipping");
                             continue;
                         }
-
+    
                         PoseClass poseClass = new PoseClass
                         {
                             trackingId = tokens[0],
@@ -1261,9 +1261,9 @@ public class HitPointManager : MonoBehaviour
                             ),
                             waypointType = type
                         };
-
+    
                         poseClassList.Add(poseClass);
-
+    
                         switch (type)
                         {
                             case WaypointType.StartPoint: startPoints++; break;
@@ -1278,31 +1278,45 @@ public class HitPointManager : MonoBehaviour
                     }
                 }
             }
-
+    
             for (int i = 0; i < poseClassList.Count; i++)
             {
                 CreateWaypointVisual(i);
             }
-
+    
             savedLocationPanel.SetActive(false);
-
+    
+            // NEW: Exit scanning mode after loading path
+            StopAllCoroutines();
+            isPathCreationMode = false;
+            isManualPathCreationMode = false;
+            isScanningMode = false;
+    
+            // NEW: Hide AR planes since we're done scanning
+            if (arPlaneManager != null)
+            {
+                foreach (var plane in arPlaneManager.trackables)
+                    plane.gameObject.SetActive(false);
+            }
+    
             if (navigationManager != null && navigationManager.textToSpeech != null)
             {
                 navigationManager.textToSpeech.Speak(
                     $"Loaded {poseClassList.Count} verified waypoints. {pathPoints} walkable path points, " +
-                    $"{obstacles} obstacles, {startPoints} start points, and {endPoints} end points. All waypoints are on safe, walkable surfaces."
+                    $"{obstacles} obstacles, {startPoints} start points, and {endPoints} end points. " +
+                    "Double tap to start navigation."
                 );
             }
-
-            textRefs.GetComponent<TextMeshProUGUI>().text = $"Loaded verified walkable path: {filename}\n" +
+    
+            textRefs.GetComponent<TextMeshProUGUI>().text = $"Path loaded: {filename}\n" +
                                                            $"Total points: {poseClassList.Count}\n" +
-                                                           $"Path points: {pathPoints}, Obstacles: {obstacles}";
+                                                           $"Ready for navigation - double tap to start";
         }
         catch (Exception e)
         {
             textRefs.GetComponent<TextMeshProUGUI>().text = "Error loading file: " + e.Message;
             Debug.LogError("Error loading path: " + e.Message);
-
+    
             if (navigationManager != null && navigationManager.textToSpeech != null)
             {
                 navigationManager.textToSpeech.Speak("Error loading path. Please try another file.");

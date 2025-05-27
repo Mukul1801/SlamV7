@@ -231,27 +231,34 @@ public class NavigationManager : MonoBehaviour
             SpeakMessage("Starting enhanced navigation with 3D mapping.");
             return;
         }
-
+    
         // Use NavigationEnhancer if available and map is validated
         if (navigationEnhancer != null && navigationEnhancer.IsMapValidForNavigation())
         {
             navigationEnhancer.StartEnhancedNavigation();
+            isNavigating = true; // NEW: Ensure flag is set
             return;
         }
-
+    
         // Regular navigation start
         if (hitPointManager.poseClassList.Count > 0)
         {
+            // NEW: Exit any active modes in HitPointManager
+            hitPointManager.StopAllCoroutines();
+            hitPointManager.isPathCreationMode = false;
+            hitPointManager.isManualPathCreationMode = false;
+            hitPointManager.isScanningMode = false;
+    
             bool hasStartPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.StartPoint);
             bool hasEndPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.EndPoint);
-
+    
             if (!hasStartPoint || !hasEndPoint)
             {
                 if (hitPointManager.poseClassList.Count >= 2)
                 {
                     hitPointManager.poseClassList[0].waypointType = WaypointType.StartPoint;
                     hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
-
+    
                     SpeakMessage("No explicit start and end points found. Using first and last points instead.");
                 }
                 else
@@ -261,34 +268,34 @@ public class NavigationManager : MonoBehaviour
                     return;
                 }
             }
-
+    
             bool pathPlanned = safePathPlanner.PlanSafePath();
-
+    
             if (pathPlanned)
             {
                 isNavigating = true;
                 lastUpdatePosition = Camera.main.transform.position;
                 destinationAnnouncementStarted = false;
                 lastEnvironmentAnnouncement = Time.time;
-
+    
                 spokenDirections.Clear();
-
+    
                 PlaySound(pathStartedSound);
-
+    
                 SpeakMessage("Navigation started. Follow the audio cues to safely reach your destination.");
-
+    
                 if (useContinuousBeacon)
                 {
                     StartBeacon();
                 }
-
+    
                 if (useVibration)
                     Vibrate();
-
+    
                 GiveDirectionToNextPathPoint(true);
-
+    
                 UpdateDebugText("Navigation active - follow audio cues.");
-
+    
                 if (navigationEnhancer != null && useDetailedAudioDescriptions)
                 {
                     StartCoroutine(DelayedPathDescription(3.0f));

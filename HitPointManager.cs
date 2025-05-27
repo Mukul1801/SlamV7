@@ -47,30 +47,11 @@ public class HitPointManager : MonoBehaviour
     // Path creation
     float width, height;
     public bool allowSavingToCSV = true;
-    [SerializeField] private bool isPathCreationMode = false;
-    private bool isManualPathCreationMode = false;
-    private bool isScanningMode = false;
+    [SerializeField] public bool isPathCreationMode = false;
+    public bool isManualPathCreationMode = false;
+    public bool isScanningMode = false;
     private Vector3 lastScanPosition;
     private float minDistanceBetweenPoints = 0.5f;
-
-    // Public properties for mode states (for external access)
-    public bool IsPathCreationMode 
-    { 
-        get { return isPathCreationMode; }
-        set { isPathCreationMode = value; }
-    }
-    
-    public bool IsManualPathCreationMode 
-    { 
-        get { return isManualPathCreationMode; }
-        set { isManualPathCreationMode = value; }
-    }
-    
-    public bool IsScanningMode 
-    { 
-        get { return isScanningMode; }
-        set { isScanningMode = value; }
-    }
 
     // NEW: Enhanced walkable surface filtering
     [Header("Walkable Surface Detection")]

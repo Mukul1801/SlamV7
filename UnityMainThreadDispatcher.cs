@@ -18,7 +18,7 @@ public class UnityMainThreadDispatcher : MonoBehaviour
         {
             // Try to find existing instance
             _instance = FindObjectOfType<UnityMainThreadDispatcher>();
-            
+
             if (_instance == null)
             {
                 // Create new instance

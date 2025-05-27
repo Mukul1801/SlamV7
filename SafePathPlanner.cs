@@ -582,8 +582,8 @@ public class SafePathPlanner : MonoBehaviour
 
         // Create intermediate points for smoother guidance with increased spacing
         List<Vector3> refinedPath = new List<Vector3>();
-        float desiredWaypointSpacing = 2.0f; // Increased from original value
-        
+        float desiredWaypointSpacing = 1.0f; // Increased from original value
+
         for (int i = 0; i < safePath.Count - 1; i++)
         {
             Vector3 current3D = safePath[i];
@@ -656,7 +656,7 @@ public class SafePathPlanner : MonoBehaviour
 
         List<Vector3> simplifiedPath = new List<Vector3>();
         simplifiedPath.Add(safePath[0]);
-        
+
         // Increased minimum distance between waypoints
         float minDistanceBetweenWaypoints = 2.0f;
 
@@ -1471,5 +1471,5 @@ public class SafePathPlanner : MonoBehaviour
 
         return length;
     }
-    
+
 }

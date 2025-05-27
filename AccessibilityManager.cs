@@ -14,7 +14,7 @@ public class AccessibilityManager : MonoBehaviour
     public TextToSpeech textToSpeech;
     public Canvas accessibilityCanvas;
     public NavigationEnhancer navigationEnhancer;
-    
+
     // NEW: Enhanced 3D Map Manager reference
     private Enhanced3DMapManager enhanced3DMapManager;
 
@@ -59,7 +59,7 @@ public class AccessibilityManager : MonoBehaviour
     public bool enableVoiceCommands = true;
     public bool enableAutoListening = false;
     public float voiceCommandTimeout = 5.0f;
-    
+
     // Gesture state tracking
     private bool isLongPressing = false;
     private float longPressStart = 0f;
@@ -78,7 +78,7 @@ public class AccessibilityManager : MonoBehaviour
     // UI element cache
     private List<TextMeshProUGUI> allTextElements = new List<TextMeshProUGUI>();
     private List<Image> allImageElements = new List<Image>();
-    
+
     // Voice recognition helper
     private VoiceRecognitionHelper voiceRecognitionHelper;
 
@@ -103,13 +103,13 @@ public class AccessibilityManager : MonoBehaviour
 
         if (audioSource == null)
             audioSource = gameObject.AddComponent<AudioSource>();
-            
+
         if (navigationEnhancer == null)
             navigationEnhancer = FindObjectOfType<NavigationEnhancer>();
-            
+
         // NEW: Find Enhanced3DMapManager
         enhanced3DMapManager = FindObjectOfType<Enhanced3DMapManager>();
-            
+
         // Initialize voice recognition if enabled
         if (enableVoiceCommands)
         {
@@ -118,11 +118,11 @@ public class AccessibilityManager : MonoBehaviour
             {
                 voiceRecognitionHelper = gameObject.AddComponent<VoiceRecognitionHelper>();
             }
-            
+
             if (voiceRecognitionHelper != null)
             {
                 voiceRecognitionHelper.OnCommandRecognized.AddListener(HandleVoiceCommand);
-                
+
                 // NEW: Set up auto-listening if enabled
                 if (enableAutoListening)
                 {
@@ -133,7 +133,7 @@ public class AccessibilityManager : MonoBehaviour
         }
 
         // Initialize menu options
-        menuOptions = new string[] 
+        menuOptions = new string[]
         {
             "Adjust speech rate",
             "Change voice pitch",
@@ -160,7 +160,7 @@ public class AccessibilityManager : MonoBehaviour
             navigationManager.useVibration = vibrationEnabled;
             navigationManager.useDetailedAudioDescriptions = verboseMode;
         }
-            
+
         if (textToSpeech != null)
         {
             textToSpeech.speechRate = speechRate;
@@ -363,12 +363,12 @@ public class AccessibilityManager : MonoBehaviour
             var currentMap = enhanced3DMapManager.GetCurrentMap();
             string status = $"Enhanced map loaded: {currentMap.name}. ";
             status += $"Path has {currentMap.waypoints.Count} waypoints over {currentMap.totalPathLength:F1} meters. ";
-            
+
             if (enhanced3DMapManager.IsNavigating())
             {
                 status += $"Currently navigating. At waypoint {enhanced3DMapManager.GetCurrentWaypointIndex() + 1}.";
             }
-            
+
             SpeakMessage(status);
         }
         else
@@ -483,7 +483,7 @@ public class AccessibilityManager : MonoBehaviour
         selectedMenuOption = (selectedMenuOption + 1) % menuOptions.Length;
         SpeakMessage(menuOptions[selectedMenuOption]);
         PlaySound(tapSound);
-        
+
         UpdateAccessibilityStatusText();
     }
 
@@ -495,7 +495,7 @@ public class AccessibilityManager : MonoBehaviour
         selectedMenuOption = (selectedMenuOption - 1 + menuOptions.Length) % menuOptions.Length;
         SpeakMessage(menuOptions[selectedMenuOption]);
         PlaySound(tapSound);
-        
+
         UpdateAccessibilityStatusText();
     }
 
@@ -617,7 +617,7 @@ public class AccessibilityManager : MonoBehaviour
             UpdateAccessibilityStatusText();
         }
     }
-    
+
     public void IncreaseSpeechPitch()
     {
         if (textToSpeech != null)
@@ -667,7 +667,7 @@ public class AccessibilityManager : MonoBehaviour
         PlaySound(tapSound);
         UpdateAccessibilityStatusText();
     }
-    
+
     public void ToggleVerboseMode()
     {
         verboseMode = !verboseMode;
@@ -686,7 +686,7 @@ public class AccessibilityManager : MonoBehaviour
         if (voiceRecognitionHelper != null)
         {
             enableAutoListening = !enableAutoListening;
-            
+
             if (enableAutoListening)
             {
                 voiceRecognitionHelper.StartAutoListening();
@@ -702,24 +702,24 @@ public class AccessibilityManager : MonoBehaviour
         {
             SpeakMessage("Voice recognition not available");
         }
-        
+
         PlaySound(tapSound);
         UpdateAccessibilityStatusText();
     }
-    
+
     // NEW: Enhanced help with voice commands
     public void ProvideEnhancedHelp()
     {
         string helpText = "AR Navigation Assistant Help. ";
         helpText += "Gestures: Single tap for directions, double tap to start or stop navigation, triple tap for status, long press for voice commands. ";
         helpText += "Swipe up to load paths, down to save paths. ";
-        
+
         if (enableVoiceCommands && voiceRecognitionHelper != null)
         {
             helpText += "Voice commands available: Say 'Start navigation', 'Stop navigation', 'Record path', 'Save path', 'Load path', ";
             helpText += "'Where am I', 'What's ahead', 'Help', 'Repeat', or 'Emergency' for assistance. ";
             helpText += "You can also use natural phrases like 'begin navigation' or 'tell me what's in front of me'. ";
-            
+
             if (enableAutoListening)
             {
                 helpText += "Auto listening is enabled, so I'm always ready for voice commands.";
@@ -729,7 +729,7 @@ public class AccessibilityManager : MonoBehaviour
                 helpText += "Use long press to activate voice listening.";
             }
         }
-        
+
         SpeakMessage(helpText);
     }
 
@@ -828,7 +828,7 @@ public class AccessibilityManager : MonoBehaviour
 
         if (enableVibrationButton != null)
             enableVibrationButton.onClick.AddListener(ToggleVibration);
-            
+
         if (enableVerboseModeButton != null)
             enableVerboseModeButton.onClick.AddListener(ToggleVerboseMode);
     }
@@ -838,12 +838,12 @@ public class AccessibilityManager : MonoBehaviour
         if (accessibilityStatusText != null)
         {
             string status = "";
-            
+
             if (accessibilityMenuOpen && menuOptions != null && selectedMenuOption < menuOptions.Length)
             {
                 status += "Selected option: " + menuOptions[selectedMenuOption] + "\n\n";
             }
-            
+
             status += "Text Size: " + (textScale * 100).ToString("F0") + "%\n";
 
             if (textToSpeech != null)
@@ -855,7 +855,7 @@ public class AccessibilityManager : MonoBehaviour
             status += "High Contrast: " + (highContrastMode ? "On" : "Off") + "\n";
             status += "Vibration: " + (vibrationEnabled ? "On" : "Off") + "\n";
             status += "Verbose Mode: " + (verboseMode ? "On" : "Off") + "\n";
-            
+
             // NEW: Voice command status
             if (enableVoiceCommands)
             {
@@ -917,7 +917,7 @@ public class AccessibilityManager : MonoBehaviour
             navigationEnhancer.AnnounceWhatsAhead();
             return;
         }
-        
+
         if (hitPointManager == null || Camera.main == null)
             return;
 
@@ -989,11 +989,11 @@ public class AccessibilityManager : MonoBehaviour
         {
             PoseClass nearestPath = null;
             float nearestPathDistance = float.MaxValue;
-            
+
             foreach (var pose in hitPointManager.poseClassList)
             {
-                if (pose.waypointType == WaypointType.PathPoint || 
-                    pose.waypointType == WaypointType.StartPoint || 
+                if (pose.waypointType == WaypointType.PathPoint ||
+                    pose.waypointType == WaypointType.StartPoint ||
                     pose.waypointType == WaypointType.EndPoint)
                 {
                     float distance = Vector3.Distance(rayStart, pose.position);
@@ -1004,28 +1004,28 @@ public class AccessibilityManager : MonoBehaviour
                     }
                 }
             }
-            
+
             if (nearestPath != null)
             {
                 if (foundSomething)
                     message += " ";
-                
+
                 string pointType = "path point";
                 if (nearestPath.waypointType == WaypointType.StartPoint)
                     pointType = "start point";
                 else if (nearestPath.waypointType == WaypointType.EndPoint)
                     pointType = "destination";
-                
+
                 Vector3 pathDirection = nearestPath.position - rayStart;
                 pathDirection.y = 0;
                 pathDirection.Normalize();
-                
+
                 float pathAngle = Vector3.SignedAngle(Camera.main.transform.forward, pathDirection, Vector3.up);
                 string pathDirectionName = GetRelativeDirection(pathAngle);
-                
-                message += "There is a " + pointType + " " + pathDirectionName + ", " + 
+
+                message += "There is a " + pointType + " " + pathDirectionName + ", " +
                           nearestPathDistance.ToString("F1") + " meters away.";
-                          
+
                 foundSomething = true;
             }
         }
@@ -1045,7 +1045,7 @@ public class AccessibilityManager : MonoBehaviour
             navigationEnhancer.DescribePathQuality();
             return;
         }
-        
+
         string status = "Current status: ";
 
         if (navigationManager != null && navigationManager.isNavigating)
@@ -1133,12 +1133,12 @@ public class AccessibilityManager : MonoBehaviour
             return "behind you to the right";
         }
     }
-    
+
     // NEW: Enhanced voice command handling
     public void HandleVoiceCommand(string command)
     {
         command = command.ToLower();
-        
+
         PlaySound(confirmSound);
 
         if (command.Contains("start") && (command.Contains("navigation") || command.Contains("navigate")))
@@ -1276,9 +1276,9 @@ public class AccessibilityManager : MonoBehaviour
     private void HandleEmergencyCommand()
     {
         isEmergencyMode = true;
-        
+
         SpeakMessage("Emergency mode activated. I will help you get to safety.");
-        
+
         if (enhanced3DMapManager != null && enhanced3DMapManager.IsNavigating())
         {
             enhanced3DMapManager.StopNavigation();
@@ -1287,9 +1287,9 @@ public class AccessibilityManager : MonoBehaviour
         {
             navigationManager.StopNavigation();
         }
-        
+
         AnnounceCurrentStatus();
-        
+
         if (emergencyAssistanceCoroutine != null)
         {
             StopCoroutine(emergencyAssistanceCoroutine);
@@ -1300,25 +1300,25 @@ public class AccessibilityManager : MonoBehaviour
     private System.Collections.IEnumerator EmergencyAssistanceSequence()
     {
         yield return new WaitForSeconds(3.0f);
-        
+
         SpeakMessage("Stay calm. I'm going to help you navigate to safety. First, let me scan the area around you.");
-        
+
         yield return new WaitForSeconds(2.0f);
-        
+
         AnnounceWhatsAhead();
-        
+
         yield return new WaitForSeconds(5.0f);
-        
+
         SpeakMessage("If you need immediate assistance, consider calling emergency services. Otherwise, I can help guide you to a safe location. Say 'help me navigate' to continue with guided assistance.");
-        
+
         // Enable emergency voice listening mode
         if (voiceRecognitionHelper != null)
         {
             voiceRecognitionHelper.StartAutoListening();
         }
-        
+
         yield return new WaitForSeconds(30.0f);
-        
+
         // After 30 seconds, exit emergency mode if no further commands
         if (isEmergencyMode)
         {

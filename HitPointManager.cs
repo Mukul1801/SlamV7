@@ -19,12 +19,12 @@ public class HitPointManager : MonoBehaviour
     private ARRaycastManager raycastManager;
     private ARPlaneManager arPlaneManager;
     private ARPointCloudManager arPointCloudManager;
-    
+
     // Reference to NavigationEnhancer
     private NavigationEnhancer navigationEnhancer;
-    
+
     // NEW: Reference to Enhanced3DMapManager
-    private Enhanced3DMapManager enhanced3DMapManager;
+    public Enhanced3DMapManager enhanced3DMapManager;
 
     // UI references
     public GameObject textRefs;
@@ -61,7 +61,7 @@ public class HitPointManager : MonoBehaviour
     [SerializeField] private bool onlyPlaceOnFloors = true; // Only place waypoints on horizontal floors
     [SerializeField] private float walkableHeightRange = 1.5f; // Height range considered walkable
     [SerializeField] private LayerMask walkableLayerMask = -1; // Layer mask for walkable surfaces
-    
+
     // NEW: Enhanced path creation settings
     [SerializeField] private bool useEnhanced3DMode = true;
     [SerializeField] private bool autoOptimizeWaypoints = true;
@@ -128,11 +128,11 @@ public class HitPointManager : MonoBehaviour
         navigationManager = GetComponent<NavigationManager>();
         if (navigationManager == null)
             navigationManager = FindObjectOfType<NavigationManager>();
-        
+
         navigationEnhancer = GetComponent<NavigationEnhancer>();
         if (navigationEnhancer == null)
             navigationEnhancer = FindObjectOfType<NavigationEnhancer>();
-            
+
         if (navigationEnhancer != null)
             navigationEnhancer.hitPointManager = this;
     }
@@ -167,7 +167,7 @@ public class HitPointManager : MonoBehaviour
 
         // Check for JSON files (enhanced maps)
         string[] jsonFiles = Directory.GetFiles(GetAndroidExternalStoragePath() + "/ARCoreTrackables", "*.json");
-        
+
         if (jsonFiles.Length == 0)
         {
             string[] files = Directory.GetFiles(GetAndroidExternalStoragePath() + "/ARCoreTrackables", "*.csv");
@@ -185,7 +185,7 @@ public class HitPointManager : MonoBehaviour
             }
         }
     }
-    
+
     private void CreateSavedLocationButton(string file, bool isEnhanced)
     {
         GameObject go = Instantiate(savedLocationButtonPrefab);
@@ -195,13 +195,13 @@ public class HitPointManager : MonoBehaviour
 
         string fileName = Path.GetFileName(file);
         string displayName = fileName;
-        
+
         // Add indicator for enhanced maps
         if (isEnhanced && fileName.EndsWith(".json"))
         {
             displayName = "📍 " + fileName.Replace(".json", " (Enhanced)");
         }
-        
+
         go.transform.GetChild(0).GetComponent<TextMeshProUGUI>().text = displayName;
 
         Button button = go.GetComponent<Button>();
@@ -244,7 +244,7 @@ public class HitPointManager : MonoBehaviour
                 for (int i = 0; i < raycastHitList.Count; i++)
                 {
                     Vector3 hitPosition = raycastHitList[i].pose.position;
-                    
+
                     // NEW: Validate if this is a walkable surface
                     if (IsWalkableSurface(raycastHitList[i]))
                     {
@@ -310,12 +310,12 @@ public class HitPointManager : MonoBehaviour
             if (!touchedUI)
             {
                 Ray ray = mainCamera.ScreenPointToRay(touch.position);
-                
+
                 // NEW: Only raycast for walkable surfaces
                 if (raycastManager.Raycast(ray, raycastHitList, TrackableType.PlaneWithinPolygon))
                 {
                     ARRaycastHit hit = raycastHitList[0];
-                    
+
                     // NEW: Validate walkable surface before placing waypoint
                     if (IsWalkableSurface(hit))
                     {
@@ -424,7 +424,7 @@ public class HitPointManager : MonoBehaviour
             // Check surface normal for slope
             Vector3 normal = plane.normal;
             float slopeAngle = Vector3.Angle(normal, Vector3.up);
-            
+
             if (slopeAngle > maxGroundSlope)
             {
                 return false;
@@ -521,7 +521,7 @@ public class HitPointManager : MonoBehaviour
         if (poseClassList.Count <= 2) return;
 
         List<PoseClass> optimizedWaypoints = new List<PoseClass>();
-        
+
         // Always keep start point
         if (poseClassList.Count > 0)
             optimizedWaypoints.Add(poseClassList[0]);
@@ -530,7 +530,7 @@ public class HitPointManager : MonoBehaviour
         for (int i = 1; i < poseClassList.Count - 1; i++)
         {
             PoseClass currentPose = poseClassList[i];
-            
+
             // Skip if too close to previous waypoint
             if (optimizedWaypoints.Count > 0)
             {
@@ -625,12 +625,12 @@ public class HitPointManager : MonoBehaviour
         {
             string pathName = "Path_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
             enhanced3DMapManager.StartPathRecording(pathName);
-            
+
             if (navigationManager.textToSpeech != null)
             {
                 navigationManager.textToSpeech.Speak("Enhanced path recording started. I will create optimal waypoints on walkable surfaces as you walk.");
             }
-            
+
             // Switch to enhanced mode
             StopAllCoroutines();
             ClearCurrentWaypoints();
@@ -638,7 +638,7 @@ public class HitPointManager : MonoBehaviour
             isPathCreationMode = false;
             isManualPathCreationMode = false;
             isScanningMode = false;
-            
+
             textRefs.GetComponent<TextMeshProUGUI>().text = "Enhanced 3D Path Recording Active\nWalk slowly along your desired route.\n";
         }
         else
@@ -655,7 +655,7 @@ public class HitPointManager : MonoBehaviour
         isManualPathCreationMode = false;
         isScanningMode = true;
         lastScanTime = 0;
-        
+
         if (mainCamera != null)
             lastScanPosition = mainCamera.transform.position;
         else
@@ -1033,7 +1033,7 @@ public class HitPointManager : MonoBehaviour
         {
             if (string.IsNullOrEmpty(filename))
                 filename = "EnhancedMap_" + DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            
+
             enhanced3DMapManager.SaveEnhanced3DMap();
             return;
         }

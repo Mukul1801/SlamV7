@@ -1422,15 +1422,18 @@ public class NavigationEnhancer : MonoBehaviour
     {
         if (navigationManager == null || !IsMapValidForNavigation())
             return;
-
+    
         // Reset state
         announcedTurns.Clear();
         lastAnnouncementPosition = Vector3.zero;
         lastEnvironmentAnnouncement = Time.time;
-
-        // Start navigation
-        navigationManager.StartNavigation();
-
+    
+        // NEW: Set navigation flag directly instead of calling StartNavigation
+        if (navigationManager != null)
+        {
+            navigationManager.isNavigating = true;
+        }
+    
         // Update path info if available
         if (pathInfoText != null)
         {
@@ -1439,10 +1442,10 @@ public class NavigationEnhancer : MonoBehaviour
                                 $"Waypoints: {currentMap.metadata.waypointCount}\n" +
                                 $"Obstacles: {currentMap.metadata.obstacleCount}";
         }
-
+    
         // Provide initial guidance
         SpeakMessage("Enhanced navigation started. Follow the audio cues to reach your destination.");
-
+    
         // Describe path after a short delay
         StartCoroutine(DelayedPathDescription());
     }

@@ -18,7 +18,7 @@ public class VoiceCommand
 public class VoiceRecognitionHelper : MonoBehaviour
 {
     public StringEvent OnCommandRecognized = new StringEvent();
-    
+
     [Header("Voice Recognition Settings")]
     public VoiceCommand[] predefinedCommands;
     public float recognitionConfidenceThreshold = 0.7f;
@@ -26,14 +26,14 @@ public class VoiceRecognitionHelper : MonoBehaviour
     public float listeningTimeout = 5.0f;
     public bool autoStartListening = false;
     public float autoListenInterval = 10.0f;
-    
+
     [Header("Audio Feedback")]
     public AudioSource audioSource;
     public AudioClip startListeningSound;
     public AudioClip stopListeningSound;
     public AudioClip recognizedCommandSound;
     public AudioClip errorSound;
-    
+
     // State tracking
     private bool isInitialized = false;
     private bool isListening = false;
@@ -43,79 +43,79 @@ public class VoiceRecognitionHelper : MonoBehaviour
     private bool isSupportedPlatform = false;
     private Coroutine autoListenCoroutine;
     private bool permissionGranted = false;
-    
+
     // Default commands
     private VoiceCommand[] defaultCommands = new VoiceCommand[]
     {
-        new VoiceCommand 
-        { 
-            command = "Start navigation", 
+        new VoiceCommand
+        {
+            command = "Start navigation",
             alternateCommands = new string[] { "Begin navigation", "Navigate", "Start guiding", "Start", "Go" },
             description = "Start following the loaded path"
         },
-        new VoiceCommand 
-        { 
-            command = "Stop navigation", 
+        new VoiceCommand
+        {
+            command = "Stop navigation",
             alternateCommands = new string[] { "End navigation", "Stop guiding", "Pause navigation", "Stop", "Halt" },
             description = "Stop the current navigation session"
         },
-        new VoiceCommand 
-        { 
-            command = "Where am I", 
+        new VoiceCommand
+        {
+            command = "Where am I",
             alternateCommands = new string[] { "Current location", "My position", "Location status", "Status" },
             description = "Announce your current position and status"
         },
-        new VoiceCommand 
-        { 
-            command = "What's ahead", 
+        new VoiceCommand
+        {
+            command = "What's ahead",
             alternateCommands = new string[] { "Describe surroundings", "What's around me", "Scan area", "Look ahead" },
             description = "Describe what's in front of you"
         },
-        new VoiceCommand 
-        { 
-            command = "Help", 
+        new VoiceCommand
+        {
+            command = "Help",
             alternateCommands = new string[] { "Instructions", "Commands", "How to use", "Assist me" },
             description = "Get help about how to use the app"
         },
-        new VoiceCommand 
-        { 
-            command = "Record path", 
+        new VoiceCommand
+        {
+            command = "Record path",
             alternateCommands = new string[] { "Start recording", "Create path", "Record route" },
             description = "Start recording a new path"
         },
-        new VoiceCommand 
-        { 
-            command = "Save path", 
+        new VoiceCommand
+        {
+            command = "Save path",
             alternateCommands = new string[] { "Stop recording", "Save route", "Finish path" },
             description = "Save the current path"
         },
-        new VoiceCommand 
-        { 
-            command = "Load path", 
+        new VoiceCommand
+        {
+            command = "Load path",
             alternateCommands = new string[] { "Open path", "Browse paths", "Select path", "Load route" },
             description = "Open the path loading screen"
         },
-        new VoiceCommand 
-        { 
-            command = "Emergency", 
+        new VoiceCommand
+        {
+            command = "Emergency",
             alternateCommands = new string[] { "Help me", "I'm lost", "SOS" },
             description = "Get immediate assistance"
         },
-        new VoiceCommand 
-        { 
-            command = "Repeat", 
+        new VoiceCommand
+        {
+            command = "Repeat",
             alternateCommands = new string[] { "Say again", "Repeat that", "Again" },
             description = "Repeat the last instruction"
         }
     };
-    
+
     void Start()
     {
         Debug.Log("VoiceRecognitionHelper: Starting initialization");
-        
+
         // Check platform support
         isSupportedPlatform = Application.platform == RuntimePlatform.Android;
-        
+
         // Set up audio source
         if (audioSource == null)
         {
@@ -125,24 +125,24 @@ public class VoiceRecognitionHelper : MonoBehaviour
                 audioSource = gameObject.AddComponent<AudioSource>();
             }
         }
-        
+
         // Set up default commands
         if (predefinedCommands == null || predefinedCommands.Length == 0)
         {
             predefinedCommands = defaultCommands;
         }
-        
+
         // Initialize voice recognition
         StartCoroutine(InitializeWithDelay());
     }
-    
+
     private IEnumerator InitializeWithDelay()
     {
         // Wait a bit for the app to fully initialize
         yield return new WaitForSeconds(1.0f);
-        
+
         Initialize();
-        
+
         // Start auto-listening if enabled and initialized
         if (autoStartListening && isInitialized)
         {
@@ -150,11 +150,11 @@ public class VoiceRecognitionHelper : MonoBehaviour
             StartAutoListening();
         }
     }
-    
+
     public void Initialize()
     {
         Debug.Log("VoiceRecognitionHelper: Initialize called");
-        
+
         if (isInitialized)
         {
             Debug.Log("Already initialized");
@@ -190,7 +190,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
         Debug.Log("Voice recognition simulated in Unity Editor");
 #endif
     }
-    
+
 #if UNITY_ANDROID && !UNITY_EDITOR
     private bool CheckPermissions()
     {
@@ -314,26 +314,26 @@ public class VoiceRecognitionHelper : MonoBehaviour
     public void StartListening()
     {
         Debug.Log("StartListening called. Initialized: " + isInitialized + ", Listening: " + isListening);
-        
+
         if (!isInitialized)
         {
             Debug.LogWarning("Voice recognition not initialized");
             Initialize();
             return;
         }
-        
+
         if (isListening)
         {
             Debug.Log("Already listening");
             return;
         }
-        
+
         // Play feedback sound
         if (audioSource != null && startListeningSound != null)
         {
             audioSource.PlayOneShot(startListeningSound);
         }
-        
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -366,17 +366,17 @@ public class VoiceRecognitionHelper : MonoBehaviour
         StartCoroutine(SimulateCommand());
 #endif
     }
-    
+
     public void StopListening()
     {
         if (!isListening)
             return;
-            
+
         if (audioSource != null && stopListeningSound != null)
         {
             audioSource.PlayOneShot(stopListeningSound);
         }
-        
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         try
         {
@@ -397,7 +397,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
         isListening = false;
 #endif
     }
-    
+
     public void StartAutoListening()
     {
         if (autoListenCoroutine == null && isInitialized)
@@ -406,7 +406,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
             Debug.Log("Auto-listening started");
         }
     }
-    
+
     public void StopAutoListening()
     {
         if (autoListenCoroutine != null)
@@ -416,7 +416,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
             Debug.Log("Auto-listening stopped");
         }
     }
-    
+
     private IEnumerator AutoListenCoroutine()
     {
         while (true)
@@ -425,15 +425,15 @@ public class VoiceRecognitionHelper : MonoBehaviour
             {
                 StartListening();
             }
-            
+
             yield return new WaitForSeconds(autoListenInterval);
         }
     }
-    
+
     private IEnumerator ListeningTimeout()
     {
         yield return new WaitForSeconds(listeningTimeout);
-        
+
         if (isListening)
         {
             if (showDebugInfo)
@@ -441,39 +441,39 @@ public class VoiceRecognitionHelper : MonoBehaviour
             StopListening();
         }
     }
-    
+
 #if UNITY_EDITOR
     private IEnumerator SimulateCommand()
     {
         yield return new WaitForSeconds(UnityEngine.Random.Range(2.0f, 4.0f));
-        
+
         if (predefinedCommands != null && predefinedCommands.Length > 0)
         {
             int randomIndex = UnityEngine.Random.Range(0, predefinedCommands.Length);
             string simulatedCommand = predefinedCommands[randomIndex].command;
-            
+
             Debug.Log("Simulated voice command: " + simulatedCommand);
             OnRecognizedSpeech(simulatedCommand);
         }
-        
+
         isListening = false;
     }
 #endif
-    
+
     public void OnRecognizedSpeech(string rawCommand)
     {
         if (audioSource != null && recognizedCommandSound != null)
         {
             audioSource.PlayOneShot(recognizedCommandSound);
         }
-        
+
         string matchedCommand = ProcessCommand(rawCommand);
         lastRecognizedCommand = matchedCommand;
         isListening = false;
-        
+
         if (showDebugInfo)
             Debug.Log("Voice command: '" + rawCommand + "' -> '" + matchedCommand + "'");
-        
+
         if (!string.IsNullOrEmpty(matchedCommand))
         {
             OnCommandRecognized.Invoke(matchedCommand);
@@ -484,14 +484,14 @@ public class VoiceRecognitionHelper : MonoBehaviour
             PlayErrorSound();
         }
     }
-    
+
     private string ProcessCommand(string rawCommand)
     {
         if (string.IsNullOrEmpty(rawCommand) || predefinedCommands == null)
             return "";
-            
+
         string lowerCommand = rawCommand.ToLower().Trim();
-        
+
         // Direct matches first
         foreach (var command in predefinedCommands)
         {
@@ -499,7 +499,7 @@ public class VoiceRecognitionHelper : MonoBehaviour
             {
                 return command.command;
             }
-            
+
             if (command.alternateCommands != null)
             {
                 foreach (var alt in command.alternateCommands)
@@ -511,13 +511,13 @@ public class VoiceRecognitionHelper : MonoBehaviour
                 }
             }
         }
-        
+
         // Partial matching
         foreach (var command in predefinedCommands)
         {
             string[] commandWords = command.command.ToLower().Split(' ');
             int matchedWords = 0;
-            
+
             foreach (string word in commandWords)
             {
                 if (lowerCommand.Contains(word))
@@ -525,16 +525,16 @@ public class VoiceRecognitionHelper : MonoBehaviour
                     matchedWords++;
                 }
             }
-            
+
             if (matchedWords > 0 && (float)matchedWords / commandWords.Length >= 0.5f)
             {
                 return command.command;
             }
         }
-        
+
         return "";
     }
-    
+
     private void PlayErrorSound()
     {
         if (audioSource != null && errorSound != null)
@@ -542,15 +542,15 @@ public class VoiceRecognitionHelper : MonoBehaviour
             audioSource.PlayOneShot(errorSound);
         }
     }
-    
+
     public bool IsListening() { return isListening; }
     public bool IsInitialized() { return isInitialized; }
     public string GetLastRecognizedCommand() { return lastRecognizedCommand; }
-    
+
     void OnDestroy()
     {
         StopAutoListening();
-        
+
 #if UNITY_ANDROID && !UNITY_EDITOR
         if (speechRecognizer != null)
         {

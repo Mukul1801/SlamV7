@@ -1161,13 +1161,30 @@ public class HitPointManager : MonoBehaviour
         }
     }
 
-    // NEW: Enhanced path loading method
+    // Enhanced path loading method
     public void LoadEnhancedPath(string pathName)
     {
         if (enhanced3DMapManager != null)
         {
             bool success = enhanced3DMapManager.LoadEnhanced3DMap(pathName);
-            if (!success)
+            if (success)
+            {
+                // Exit scanning mode after loading enhanced path
+                StopAllCoroutines();
+                isPathCreationMode = false;
+                isManualPathCreationMode = false;
+                isScanningMode = false;
+    
+                // Hide AR planes
+                if (arPlaneManager != null)
+                {
+                    foreach (var plane in arPlaneManager.trackables)
+                        plane.gameObject.SetActive(false);
+                }
+    
+                textRefs.GetComponent<TextMeshProUGUI>().text = "Enhanced path loaded\nReady for navigation - double tap to start";
+            }
+            else
             {
                 // Fall back to loading regular CSV path
                 LoadPathFromFile(pathName + ".csv");

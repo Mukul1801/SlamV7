@@ -333,7 +333,7 @@ public class AccessibilityManager : MonoBehaviour
     private void OnDoubleTap(Vector2 position)
     {
         PlaySound(tapSound, 2);
-
+    
         if (navigationManager != null)
         {
             if (navigationManager.isNavigating)
@@ -343,6 +343,23 @@ public class AccessibilityManager : MonoBehaviour
             }
             else if (hitPointManager.poseClassList.Count > 0)
             {
+                // NEW: Check if we have proper start and end points
+                bool hasStartPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.StartPoint);
+                bool hasEndPoint = hitPointManager.poseClassList.Any(p => p.waypointType == WaypointType.EndPoint);
+    
+                if (!hasStartPoint || !hasEndPoint)
+                {
+                    // Auto-assign start and end points if not set
+                    if (hitPointManager.poseClassList.Count >= 2)
+                    {
+                        hitPointManager.poseClassList[0].waypointType = WaypointType.StartPoint;
+                        hitPointManager.UpdateWaypointVisual(0);
+                        
+                        hitPointManager.poseClassList[hitPointManager.poseClassList.Count - 1].waypointType = WaypointType.EndPoint;
+                        hitPointManager.UpdateWaypointVisual(hitPointManager.poseClassList.Count - 1);
+                    }
+                }
+    
                 navigationManager.StartNavigation();
             }
             else

@@ -53,6 +53,25 @@ public class HitPointManager : MonoBehaviour
     private Vector3 lastScanPosition;
     private float minDistanceBetweenPoints = 0.5f;
 
+    // Public properties for mode states (for external access)
+    public bool IsPathCreationMode 
+    { 
+        get { return isPathCreationMode; }
+        set { isPathCreationMode = value; }
+    }
+    
+    public bool IsManualPathCreationMode 
+    { 
+        get { return isManualPathCreationMode; }
+        set { isManualPathCreationMode = value; }
+    }
+    
+    public bool IsScanningMode 
+    { 
+        get { return isScanningMode; }
+        set { isScanningMode = value; }
+    }
+
     // NEW: Enhanced walkable surface filtering
     [Header("Walkable Surface Detection")]
     [SerializeField] private float maxGroundSlope = 20f; // Maximum slope angle for walkable surface
